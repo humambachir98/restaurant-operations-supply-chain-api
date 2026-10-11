@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Restaurant Shift & Inventory API"
+    app_name: str = "Restaurant Operations & Supply Chain API"
     database_url: str = "sqlite:///./restaurant.db"
     # All business dates/times (shifts, audits, orders, delivery days) are in this zone,
     # regardless of the server's own clock setting.

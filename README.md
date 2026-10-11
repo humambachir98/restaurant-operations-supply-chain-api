@@ -1,106 +1,324 @@
-# Restaurant Shift & Inventory Management API
+# Restaurant Operations & Supply Chain API
 
-FastAPI + SQLite backend for managing staff, shifts, and inventory.
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
+![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
+![Pytest](https://img.shields.io/badge/tests-82%20passing-0A9EDC?logo=pytest&logoColor=white)
 
-## Structure
+A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
+ordering. It is built around the rules a real restaurant in Germany has to follow, including
+fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and the
+**Europe/Berlin** clock with its DST changes.
 
+> Each feature started as an operational problem: stock counts that go negative, orders that
+> must arrive in 15 kg boxes, a night shift that spans the switch to winter time.
+> The README covers what was built and the reasoning behind it.
+
+---
+
+## Contents
+
+- [Project highlights](#project-highlights)
+- [Engineering problems solved](#engineering-problems-solved)
+  - [1. Smart restock & supply chain](#1-smart-restock--supply-chain)
+  - [2. German labor law compliance (Arbeitszeitgesetz)](#2-german-labor-law-compliance-arbeitszeitgesetz)
+  - [3. Realistic inventory management](#3-realistic-inventory-management)
+- [Engineering quality](#engineering-quality)
+- [Tech stack](#tech-stack)
+- [Architecture](#architecture)
+- [API overview](#api-overview)
+- [How to run](#how-to-run)
+- [Testing](#testing)
+
+---
+
+## Project highlights
+
+| Business problem | What the API does | Value |
+| --- | --- | --- |
+| Managers spend time each day working out what to order | **One-call order draft**: every low-stock item, rounded up to whole supplier packs, minus what's already on its way | Fewer stock-outs and no double-ordering |
+| Suppliers only deliver on certain days, with a cut-off | Every order gets its **expected delivery date** (Tue / Thu / Sat, 14:00 cut-off the day before) | Staff know when goods will arrive |
+| Scheduling mistakes break labor law | **Shifts over 10 hours and double-booked staff are rejected** | Compliance is enforced on every create and update |
+| Stock records don't match the shelves | **Negative stock is allowed**, and physical counts correct it while logging the variance | The system reflects reality, and shrinkage shows up |
+| Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly full audits**, as separate workflows | Fast checks on the important items, full accuracy each week |
+
+---
+
+## Engineering problems solved
+
+### 1. Smart restock & supply chain
+
+**Problem:** Suppliers don't sell 64.5 kg of fries. They sell 15 kg boxes. Orders that are
+already on their way shouldn't be ordered again. And an order placed Monday afternoon will not
+make Tuesday's delivery.
+
+**Solution:** `POST /purchase-orders/auto-suggest` builds a draft order for review. It saves
+nothing until a manager submits it.
+
+```mermaid
+flowchart LR
+    A[Low-stock items<br/>quantity ≤ reorder level] --> B["needed = 2 × reorder_level<br/>− quantity − on_order"]
+    P[(Pending orders)] -- units still arriving --> B
+    B --> C["packs = ⌈needed ÷ pack_size⌉"]
+    C --> D{packs > 0?}
+    D -- yes --> E[Suggested line]
+    D -- no --> F[Skipped: already covered]
 ```
+
+**Worked example:** French Fries are at **−4.5 kg** (more sold than recorded), the reorder level is
+30 kg and fries come in **15 kg boxes**.
+
+```text
+needed = 2 × 30 − (−4.5) − 0 = 64.5 kg
+packs  = ⌈64.5 ÷ 15⌉       = 5 boxes  →  75 kg delivered
+```
+
+```json
+{ "item_id": 8, "packs": 5, "name": "French Fries", "unit": "kg",
+  "pack_size": 15, "quantity": 75, "needed": 64.5,
+  "current_quantity": -4.5, "reorder_level": 30, "on_order": 0 }
+```
+
+Details that make it work in practice:
+
+- **Orders are in whole packs** (`packs: int`). Stock, reorder levels and audits stay in the
+  item's own unit (kg, L, pcs).
+- **Each order line saves the item's pack size at the time of ordering.** If the supplier
+  changes box sizes later, open orders still add the right amount to stock.
+- **Float-safe rounding.** `0.3 ÷ 0.1` is `2.9999…` in floating point, so the division is
+  rounded before taking the ceiling. Noise can't add or drop a whole box.
+- **Delivery days.** Orders arrive Tuesday, Thursday or Saturday, and must be placed before
+  14:00 Berlin time the day before. Monday 13:59 arrives Tuesday; Monday 14:00 arrives
+  Thursday.
+- **Receiving a delivery is atomic and can only happen once.** A conditional
+  `UPDATE … WHERE status = 'pending'` lets exactly one of two simultaneous requests mark the
+  order received. Stock is incremented in SQL (`quantity = quantity + n`), not read and
+  rewritten, so concurrent stock changes aren't lost. If any line fails, the whole
+  delivery is rolled back.
+
+### 2. German labor law compliance (Arbeitszeitgesetz)
+
+**Problem:** § 3 ArbZG limits working time to 10 hours a day. A staff member also can't work
+two shifts at once. And one night a year, the clock goes from 03:00 back to 02:00.
+
+**Solution:** these rules are checked on **every create and every update**, including when
+a shift is reassigned to another employee:
+
+| Rule | Response |
+| --- | --- |
+| `end_time` must be strictly after `start_time` | `422` |
+| A shift may last **at most 10 hours** of real elapsed time | `422` |
+| No overlap with another shift of the same employee | `400`, naming the clashing shift |
+| Back-to-back shifts (one ends exactly when the next starts) | allowed |
+
+**Subtle bug avoided:** Python subtracts two aware datetimes that share a `tzinfo` by **wall
+clock**, not by real time. So without care, a 22:00 → 08:00 shift on the night of
+24/25 October looks like 10 hours, though the employee actually works **11**. Durations are
+therefore computed in UTC:
+
+```python
+def elapsed(start: datetime, end: datetime) -> timedelta:
+    return to_local(end).astimezone(UTC) - to_local(start).astimezone(UTC)
+```
+
+| Shift (Berlin local time) | Wall clock | Real time | Result |
+| --- | --- | --- | --- |
+| 24 → 25 Oct 2026, 22:00–08:00 (clocks go back) | 10 h | **11 h** | rejected |
+| 27 → 28 Mar 2027, 22:00–09:00 (clocks go forward) | 11 h | **10 h** | accepted |
+
+**Overlap detection** is one query on an indexed column, using the half-open interval test
+`existing.start < new.end AND existing.end > new.start`. On update, the shift's own row is
+excluded.
+
+**Time zones throughout:** all business times are Europe/Berlin, whatever the server's clock is
+set to. Datetimes are **stored as UTC**, so ordering and comparisons stay correct across DST.
+They are **returned with their Berlin offset** (`2026-10-07T09:00:00+02:00`). Input without an
+offset is read as Berlin time; input with one (e.g. `Z`) is converted. A single SQLAlchemy
+`TypeDecorator` handles all of this.
+
+**Roles** are an enum (`shift_manager`, `crew`), so invalid values are rejected at the API
+boundary.
+
+> **Scope:** the 10-hour limit applies per shift. Limits per day or week across several shifts,
+> and break rules (§ 4 ArbZG), are not yet modelled.
+
+### 3. Realistic inventory management
+
+**Problem:** in a real kitchen, the stock figure is always slightly wrong. A cashier rings up
+the wrong item, a tray of fries goes in the bin and nobody records it. Rejecting negative
+stock would hide these errors instead of showing them.
+
+**Solution:**
+
+- **Negative stock is allowed.** The system shows what the records say, and the next physical
+  count corrects it.
+- **Every count is an audit record.** `POST /inventory/audit` sets each counted item to the
+  counted quantity and logs `expected`, `counted` and `variance = counted − expected`. A
+  negative variance means shrinkage. History is at `GET /inventory/audits`.
+- **Two separate audit workflows:**
+
+| | Daily Key-Item audit | Weekly full audit |
+| --- | --- | --- |
+| Purpose | Quick check of high-value, fast-moving items | Full stock-take |
+| Scope | Only items flagged `is_daily_tracked` (patties, buns, fries, oil, …) | Any item |
+| Enforcement | Including a non-Key item returns `400` | — |
+| Item list | `GET /inventory/daily-items` | `GET /inventory/` |
+
+- **Validation that matches reality:** a *count* can't be negative, but a *stock balance* can.
+  Each item may appear only once per audit or order. An audit with an unknown item changes
+  nothing.
+
+---
+
+## Engineering quality
+
+- **The database schema is managed by Alembic.** The app applies pending migrations on startup.
+  Migration scripts are reviewed by hand. For example, the pack-size migration fills in data
+  for existing rows: old free-text roles become `shift_manager` or `crew`, and old order
+  lines keep exactly the same stock quantity.
+- **Migrations are safe on SQLite.** Each upgrade runs in a single transaction (SQLite's driver
+  doesn't do this by default), so a failed migration leaves the database untouched. Foreign keys
+  are checked before commit.
+- **A test catches drift between models and migrations.** It applies every migration to a fresh
+  database, compares the result to the models, then downgrades back to empty.
+- **The seed script is safe to re-run.** It only inserts missing rows and never resets live
+  stock.
+- **Code is layered:** routers → Pydantic schemas → SQLAlchemy models → pure domain helpers
+  (`restock`, `delivery`, `time`). The business rules are plain functions with their own unit
+  tests.
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+| --- | --- |
+| Language | **Python 3.11+** |
+| Web framework | **FastAPI** (automatic OpenAPI / Swagger docs) |
+| Validation | **Pydantic v2** (+ `pydantic-settings` for `.env` configuration) |
+| ORM | **SQLAlchemy 2.x** (typed `Mapped[]` models) |
+| Migrations | **Alembic** (batch mode for SQLite) |
+| Database | **SQLite** (configurable via `DATABASE_URL`) |
+| Time zones | `zoneinfo` + `tzdata` (Europe/Berlin) |
+| Testing | **Pytest** + FastAPI `TestClient`, in-memory SQLite |
+| Server | **Uvicorn** |
+
+---
+
+## Architecture
+
+```text
 app/
-  main.py          # FastAPI app, router registration, migrations on startup
-  config.py        # Settings (reads .env)
-  database/        # Engine, session, Base, get_db, Berlin-aware DateTime type, migration helper
-  models/          # SQLAlchemy ORM models (Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder)
-  schemas/         # Pydantic request/response models
-  routers/         # API endpoints per resource
-  utils/           # Berlin clock helpers, delivery-day calculation, restock/pack-size maths
-alembic/           # Database migrations (alembic/versions/)
-tests/             # pytest suite (in-memory SQLite)
+├── main.py            # FastAPI app, router registration, migrations on startup
+├── config.py          # Settings from .env (time zone, order cut-off, DB URL)
+├── database/          # Engine & session, UTC-storing/Berlin-returning DateTime type, migration helper
+├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder
+├── schemas/           # Pydantic request/response models and validation rules
+├── routers/           # HTTP endpoints per resource
+└── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
+alembic/versions/      # Migration history
+tests/                 # 82 tests: API, business rules, DST edge cases, migrations, seed
+seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
 ```
 
-## Inventory workflow
+---
 
-- **Stock can go negative.** POS mis-rings and unrecorded waste are corrected by the next count.
-- **Audits:** `POST /inventory/audit` with `audit_type` `daily` or `weekly`. Daily audits may only
-  contain Key Items (`is_daily_tracked`, see `GET /inventory/daily-items`); anything else is a 400. Each counted item's stock is set to the physical count and the variance
-  (`counted - expected`) is logged. History: `GET /inventory/audits`.
-- **Pack sizes:** each item has a `pack_size` (units per supplier pack, default `1.0`; e.g. French
-  Fries come in 15 kg boxes, so `pack_size=15`). Stock, reorder levels and audits are always in the
-  item's `unit`; purchase orders are always in whole packs.
-- **Purchase orders (Bestellung):** `POST /purchase-orders/` with
-  `{"items": [{"item_id": 8, "packs": 5}]}` (whole packs, not units). Each line stores the item's
-  `pack_size` at order time and reports `quantity = packs * pack_size` in units, so changing an item's
-  pack size later doesn't change what an open order delivers. The order gets status `pending` and the
-  expected delivery date. Deliveries are Tuesday, Thursday and Saturday; an order makes a delivery only if
-  placed before 14:00 the day before (e.g. Monday 15:00 misses Tuesday and arrives Thursday).
-  `POST /purchase-orders/{id}/receive` marks it `received` and adds all quantities to stock in one
-  transaction; receiving twice returns 400.
-- **Auto-suggest:** `POST /purchase-orders/auto-suggest` drafts an order for every low-stock item
-  (saves nothing). Per item: `needed = 2 * reorder_level - quantity - on_order` (units still
-  arriving in pending orders), then rounded **up** to whole packs. Example: Fries at -4.5 kg with a
-  reorder level of 30 kg need 64.5 kg; in 15 kg boxes that's `packs: 5` (`quantity: 75`). Items whose
-  need is fully covered by pending orders are left out. Submit the draft's `items` as-is to
-  `POST /purchase-orders/` (display fields are ignored).
+## API overview
 
-## Staff & shifts
+Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redoc`.
 
-- **Roles:** `role` is `shift_manager` or `crew`; anything else is a 422.
-- **Shift rules** (create and update):
-  - `end_time` must be strictly after `start_time` (422).
-  - A shift may last at most **10 hours** (German Working Hours Act, ArbZG § 3) (422). Duration is
-    real elapsed time in Europe/Berlin, so a 22:00-08:00 night shift across the October DST change
-    counts as 11 h and is rejected.
-  - An employee can't have overlapping shifts: creating, moving or reassigning a shift so that it
-    overlaps another shift of the same employee returns **400** naming the clashing shift.
-    Back-to-back shifts (one ends exactly when the next starts) are fine.
+| Area | Endpoints |
+| --- | --- |
+| Employees | `GET/POST /employees/` · `GET/PATCH/DELETE /employees/{id}` |
+| Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
+| Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
+| Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly`) |
+| Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/{id}/receive` |
+| Health | `GET /health` |
 
-## Time zone
+---
 
-All business times are **Europe/Berlin**, whatever the server's clock is set to. Datetimes are
-stored as UTC and returned with their Berlin offset (e.g. `2026-10-07T09:00:00+02:00`). Input
-without an offset is taken as Berlin local time; input with one (e.g. `Z`) is converted.
+## How to run
 
-## Database migrations (Alembic)
+**Requirements:** Python 3.11 or newer.
 
-The app applies pending migrations on startup (`MIGRATE_ON_STARTUP`). After changing a model:
+### 1. Clone and create a virtual environment
 
 ```bash
-alembic revision --autogenerate -m "describe the change"   # review the generated file!
-alembic upgrade head                                       # or just restart the app
-```
+git clone https://github.com/humambachir98/restaurant-operations-supply-chain-api.git
+cd restaurant-operations-supply-chain-api
 
-Autogenerate can't migrate data: when a change affects existing rows (e.g. a new NOT NULL column),
-edit the script to backfill them, as `ac9056a13672_pack_sizes_and_employee_roles` does (existing
-roles are mapped to `shift_manager`/`crew`; existing order lines keep the same unit quantity).
-`alembic downgrade -1` rolls back one step. On SQLite, each upgrade runs in a single transaction,
-so a failing migration leaves the database untouched. `tests/test_migrations.py` fails if models
-and migrations drift apart.
-
-## Setup
-
-```bash
 python -m venv .venv
-.venv\Scripts\activate        # Windows (source .venv/bin/activate on macOS/Linux)
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
-copy .env.example .env         # optional
-uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000/docs for the interactive API docs.
+### 2. Configure (optional)
 
-### Sample data
+```bash
+cp .env.example .env        # Windows: copy .env.example .env
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite:///./restaurant.db` | Database connection |
+| `TIMEZONE` | `Europe/Berlin` | Business time zone |
+| `ORDER_CUTOFF` | `14:00` | Latest order time on the day before a delivery |
+| `MIGRATE_ON_STARTUP` | `true` | Apply pending migrations when the app starts |
+
+### 3. Apply database migrations
+
+```bash
+alembic upgrade head
+```
+
+The app also does this on startup. To change the schema later:
+
+```bash
+alembic revision --autogenerate -m "describe the change"   # always review the generated script
+alembic upgrade head
+alembic downgrade -1                                       # roll back one step
+```
+
+### 4. Load sample data
 
 ```bash
 python seed.py
 ```
 
-Run from the project root. It applies migrations, then adds 3 employees (1 shift manager, 2 crew),
-18 daily-tracked Key Items and 10 other inventory items, each with a realistic supplier pack size. It's safe to run again: rows that already
-exist (matched by employee email / item name) are skipped and never overwritten, so live stock
-levels, reorder levels and roles are kept. The one exception: an existing item whose `pack_size`
-is still the default `1.0` (e.g. created before pack sizes existed) gets its seed pack size.
+This adds 3 employees (1 shift manager, 2 crew), 18 daily-tracked Key Items and 10 other items,
+each with a realistic supplier pack size (e.g. fries in 15 kg boxes, patties 48 per box). It
+can be run again safely: existing rows are matched by email or name and never overwritten, so
+live stock is kept. The one exception: an item whose `pack_size` is still the default `1.0`
+gets its seed value.
 
-## Tests
+### 5. Start the API
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Then open **http://127.0.0.1:8000/docs** and try `POST /purchase-orders/auto-suggest`.
+
+---
+
+## Testing
 
 ```bash
 pytest
 ```
+
+There are **82 tests**, each running against a fresh in-memory database. They include:
+
+- restock maths, pack rounding and floating-point edge cases
+- delivery-day cut-offs on the Berlin clock
+- shift duration limits **across both DST changes**, and every kind of overlap (partial, contained, identical, back-to-back, reassignment)
+- atomic, one-time receiving of deliveries, with rollback on failure
+- daily vs. weekly audit rules and variance logging
+- migrations: model/migration drift, full downgrade, and the data backfill for existing rows
+- seed script idempotency
