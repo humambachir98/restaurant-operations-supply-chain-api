@@ -8,4 +8,13 @@ const api = axios.create({
   timeout: 10_000,
 })
 
+/** A readable message for a failed request, using FastAPI's `detail` when there is one. */
+export function errorMessage(err) {
+  if (!err.response) return `Can't reach the API at ${API_URL}. Is the backend running?`
+  const { detail } = err.response.data ?? {}
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d) => d.msg).join('; ') // 422 validation errors
+  return `The API returned ${err.response.status}.`
+}
+
 export default api
