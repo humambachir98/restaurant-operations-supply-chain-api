@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-82%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-83%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -29,6 +29,7 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
 - [Architecture](#architecture)
 - [API overview](#api-overview)
 - [How to run](#how-to-run)
+- [Frontend](#frontend)
 - [Testing](#testing)
 
 ---
@@ -203,6 +204,7 @@ stock would hide these errors instead of showing them.
 | Time zones | `zoneinfo` + `tzdata` (Europe/Berlin) |
 | Testing | **Pytest** + FastAPI `TestClient`, in-memory SQLite |
 | Server | **Uvicorn** |
+| Frontend | **React 19** + **Vite**, **Tailwind CSS v4**, Axios, React Router, lucide-react |
 
 ---
 
@@ -218,8 +220,9 @@ app/
 ├── routers/           # HTTP endpoints per resource
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 82 tests: API, business rules, DST edge cases, migrations, seed
+tests/                 # 83 tests: API, business rules, DST edge cases, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
+frontend/              # React + Vite dashboard (see Frontend below)
 ```
 
 ---
@@ -270,6 +273,7 @@ cp .env.example .env        # Windows: copy .env.example .env
 | `TIMEZONE` | `Europe/Berlin` | Business time zone |
 | `ORDER_CUTOFF` | `14:00` | Latest order time on the day before a delivery |
 | `MIGRATE_ON_STARTUP` | `true` | Apply pending migrations when the app starts |
+| `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Browser origins allowed to call the API |
 
 ### 3. Apply database migrations
 
@@ -307,13 +311,41 @@ Then open **http://127.0.0.1:8000/docs** and try `POST /purchase-orders/auto-sug
 
 ---
 
+## Frontend
+
+A React + Vite web app in `frontend/`. It talks to the API above.
+
+**Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
+
+```bash
+# Terminal 1: the API (from the project root)
+uvicorn app.main:app --reload
+
+# Terminal 2: the web app
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173**. The app calls the API at `http://127.0.0.1:8000`. To use another
+address, set `VITE_API_URL` in `frontend/.env.local`. The API only accepts browser requests from
+the origins in `CORS_ORIGINS`.
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Development server with hot reload |
+| `npm run build` | Production build into `frontend/dist/` |
+| `npm run lint` | Lint with oxlint |
+
+---
+
 ## Testing
 
 ```bash
 pytest
 ```
 
-There are **82 tests**, each running against a fresh in-memory database. They include:
+There are **83 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock

@@ -35,3 +35,15 @@ def test_low_stock_filter(client):
     client.post("/inventory/", json={"name": "Rice", "unit": "kg", "quantity": 20, "reorder_level": 5})
     low = client.get("/inventory/?low_stock=true").json()
     assert [i["name"] for i in low] == ["Flour"]
+
+
+def test_cors_allows_vite_dev_server(client):
+    for origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
+        resp = client.options(
+            "/inventory/daily-items",
+            headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+        )
+        assert resp.headers["access-control-allow-origin"] == origin
+
+    resp = client.get("/health", headers={"Origin": "http://evil.example"})
+    assert "access-control-allow-origin" not in resp.headers

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     order_cutoff: time = time(14, 0)
     # Apply pending Alembic migrations when the app starts.
     migrate_on_startup: bool = True
+    # Browser origins allowed to call the API (the Vite dev server by default).
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     model_config = SettingsConfigDict(env_file=".env")
 
