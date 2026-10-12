@@ -75,7 +75,7 @@ def test_audit_sets_quantities_and_logs_variance(client):
 @pytest.mark.parametrize(
     "body",
     [
-        {"audit_type": "monthly", "counts": [{"item_id": 1, "counted_quantity": 1}]},
+        {"audit_type": "yearly", "counts": [{"item_id": 1, "counted_quantity": 1}]},
         {"audit_type": "weekly", "counts": []},
         {"audit_type": "weekly", "counts": [{"item_id": 1, "counted_quantity": -1}]},
         {"audit_type": "weekly", "counts": [{"item_id": 1, "counted_quantity": 1}, {"item_id": 1, "counted_quantity": 2}]},
@@ -260,3 +260,41 @@ def test_receive_rolls_back_if_a_stock_update_fails(client, monkeypatch):
     assert client.get(f"/purchase-orders/{order['id']}").json()["status"] == "pending"
     assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 5
     assert client.get(f"/inventory/{fries['id']}").json()["quantity"] == 5
+
+
+# --- Monthly (end-of-month) audits ---
+
+
+def test_monthly_audit_counts_any_item_and_overwrites_stock(client):
+    patties = _item(client, "Patties", quantity=100, daily=True)
+    napkins = _item(client, "Napkins", quantity=-20)  # not a Key Item; negative after mis-rings
+    untouched = _item(client, "Straws", quantity=50)
+
+    resp = client.post(
+        "/inventory/audit",
+        json={
+            "audit_type": "monthly",
+            "counts": [
+                {"item_id": patties["id"], "counted_quantity": 96},
+                {"item_id": napkins["id"], "counted_quantity": 1500},
+            ],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["audit_type"] == "monthly"
+    assert {line["item_id"]: line["variance"] for line in resp.json()["lines"]} == {patties["id"]: -4, napkins["id"]: 1520}
+
+    assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 96
+    assert client.get(f"/inventory/{napkins['id']}").json()["quantity"] == 1500
+    assert client.get(f"/inventory/{untouched['id']}").json()["quantity"] == 50  # not counted: kept
+    assert [a["audit_type"] for a in client.get("/inventory/audits?audit_type=monthly").json()] == ["monthly"]
+
+
+@pytest.mark.parametrize("audit_type", ["weekly", "monthly"])
+def test_full_audits_accept_non_key_items(client, audit_type):
+    napkins = _item(client, "Napkins", quantity=10)
+    resp = client.post(
+        "/inventory/audit",
+        json={"audit_type": audit_type, "counts": [{"item_id": napkins["id"], "counted_quantity": 7}]},
+    )
+    assert resp.status_code == 201, resp.text

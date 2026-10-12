@@ -74,7 +74,11 @@ def list_daily_items(db: Session = Depends(get_db)):
 
 @router.post("/audit", response_model=InventoryAuditRead, status_code=status.HTTP_201_CREATED)
 def submit_audit(payload: InventoryAuditCreate, db: Session = Depends(get_db)):
-    """Record a physical count: stock is set to the counted quantity and the variance is logged."""
+    """Record a physical count: stock is set to the counted quantity and the variance is logged.
+
+    `daily` audits may only contain Key Items (`is_daily_tracked`); `weekly` and `monthly`
+    accept any item. Items left out keep their current stock.
+    """
     items = get_items_or_400(db, (count.item_id for count in payload.counts))
 
     if payload.audit_type == AuditType.daily:
@@ -137,5 +141,5 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Item is referenced by audits, purchase orders or complaints and can't be deleted",
+            "Item is referenced by audits, orders, complaints, waste or transfers and can't be deleted",
         )

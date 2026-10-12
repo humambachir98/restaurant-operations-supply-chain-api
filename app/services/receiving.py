@@ -4,7 +4,8 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import InventoryItem, PurchaseOrder, PurchaseOrderStatus
+from app.models import PurchaseOrder, PurchaseOrderStatus
+from app.services.stock import adjust_stock
 from app.utils.time import now_local, to_local
 
 logger = logging.getLogger(__name__)
@@ -26,12 +27,7 @@ def mark_received(db: Session, order: PurchaseOrder) -> bool:
         return False
 
     for line in order.items:
-        # Increment in SQL rather than read-modify-write, so concurrent stock changes aren't lost.
-        db.execute(
-            update(InventoryItem)
-            .where(InventoryItem.id == line.item_id)
-            .values(quantity=InventoryItem.quantity + line.quantity)  # packs * pack_size
-        )
+        adjust_stock(db, line.item_id, line.quantity)  # packs * pack_size
     return True
 
 

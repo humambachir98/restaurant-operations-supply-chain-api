@@ -4,6 +4,7 @@ from app.models.employee import Employee, EmployeeRole
 from app.models.inventory import InventoryItem
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.models.shift import Shift
+from app.models.stock_movement import StoreTransfer, TransferDirection, WasteLog
 
 __all__ = [
     "AuditType", "InventoryAudit", "InventoryAuditLine",
@@ -12,4 +13,5 @@ __all__ = [
     "InventoryItem",
     "PurchaseOrder", "PurchaseOrderItem", "PurchaseOrderStatus",
     "Shift",
+    "StoreTransfer", "TransferDirection", "WasteLog",
 ]

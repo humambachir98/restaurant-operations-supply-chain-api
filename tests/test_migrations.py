@@ -63,3 +63,23 @@ def test_pack_size_and_role_migration_keeps_existing_data(tmp_path):
         quantities = conn.execute(text("SELECT quantity FROM purchase_order_items ORDER BY id")).scalars().all()
         assert quantities == [40, 12.5]
     engine.dispose()
+
+
+def test_monthly_audits_survive_downgrade_as_weekly(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'monthly.db').as_posix()}"
+    config = alembic_config(url)
+    command.upgrade(config, "head")
+
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO inventory_audits (id, audit_type, created_at) VALUES "
+            "(1, 'monthly', '2026-10-31 20:00:00'), (2, 'daily', '2026-10-31 08:00:00')"
+        ))
+
+    command.downgrade(config, "b21e66ccd8c4")  # before monthly audits existed
+    with engine.connect() as conn:
+        types = conn.execute(text("SELECT audit_type FROM inventory_audits ORDER BY id")).scalars().all()
+        assert types == ["weekly", "daily"]
+        assert "waste_logs" not in inspect(engine).get_table_names()
+    engine.dispose()

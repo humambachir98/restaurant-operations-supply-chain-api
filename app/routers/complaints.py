@@ -3,8 +3,9 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Complaint, ComplaintStatus, InventoryItem, PurchaseOrder, PurchaseOrderStatus
+from app.models import Complaint, ComplaintStatus, PurchaseOrder, PurchaseOrderStatus
 from app.schemas import ComplaintCreate, ComplaintRead
+from app.services.stock import adjust_stock
 from app.utils.time import now_local
 
 router = APIRouter(prefix="/complaints", tags=["complaints"])
@@ -32,12 +33,7 @@ def _resolve(db: Session, complaint: Complaint, new_status: ComplaintStatus, app
         if flipped == 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Complaint has already been {complaint.status}")
         if apply_to_stock:
-            # Increment in SQL so concurrent stock changes aren't lost.
-            db.execute(
-                update(InventoryItem)
-                .where(InventoryItem.id == complaint.item_id)
-                .values(quantity=InventoryItem.quantity + complaint.quantity_difference)
-            )
+            adjust_stock(db, complaint.item_id, complaint.quantity_difference)
         db.commit()
     except Exception:
         db.rollback()

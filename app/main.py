@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database.migrations import upgrade_to_head
-from app.routers import complaints, employees, inventory, purchase_orders, shifts
+from app.routers import complaints, dashboard, employees, inventory, purchase_orders, shifts, transfers, waste
 from app.scheduler import catch_up_on_startup, create_scheduler
 
 
@@ -39,6 +39,9 @@ app.include_router(shifts.router)
 app.include_router(inventory.router)
 app.include_router(purchase_orders.router)
 app.include_router(complaints.router)
+app.include_router(waste.router)
+app.include_router(transfers.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health", tags=["health"])

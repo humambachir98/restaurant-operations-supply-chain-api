@@ -10,12 +10,13 @@ from app.utils.time import now_local
 
 
 class AuditType(enum.StrEnum):
-    daily = "daily"
+    daily = "daily"  # Key Items only
     weekly = "weekly"
+    monthly = "monthly"  # end-of-month full count
 
 
 class InventoryAudit(Base):
-    """One physical count session (a daily Key Item count or the full weekly count)."""
+    """One physical count session: daily Key Item count, or a weekly / end-of-month full count."""
 
     __tablename__ = "inventory_audits"
 

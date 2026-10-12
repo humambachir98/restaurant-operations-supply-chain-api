@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.config import settings
@@ -25,3 +25,11 @@ def elapsed(start: datetime, end: datetime) -> timedelta:
     shift over the October change would come out as 8h instead of 9h. Compare in UTC instead.
     """
     return to_local(end).astimezone(UTC) - to_local(start).astimezone(UTC)
+
+
+def local_day_bounds(day: date) -> tuple[datetime, datetime]:
+    """[start, end) of a calendar day in the restaurant's zone (23 or 25 hours on DST days)."""
+    return (
+        datetime.combine(day, time.min, tzinfo=LOCAL_TZ),
+        datetime.combine(day + timedelta(days=1), time.min, tzinfo=LOCAL_TZ),
+    )
