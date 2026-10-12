@@ -120,7 +120,9 @@ export default function Audits() {
   const parsed = visible.map((item) => ({ item, value: parseCount(counts[item.id] ?? '') }))
   const entered = parsed.filter(({ value }) => value !== null)
   const invalid = entered.filter(({ value }) => Number.isNaN(value))
-  const canSubmit = entered.length > 0 && invalid.length === 0 && !submitting
+  // A complete count only: every row needs a number (0 if none is left) before the batch can go in.
+  const blank = parsed.length - entered.length
+  const canSubmit = parsed.length > 0 && blank === 0 && invalid.length === 0 && !submitting
 
   const downloadPdf = () =>
     downloadChecklist({
@@ -139,7 +141,7 @@ export default function Audits() {
       const { data: audit } = await api.post('/inventory/audit', {
         audit_type: auditType,
         notes: notes.trim() || null,
-        counts: entered.map(({ item, value }) => ({ item_id: item.id, counted_quantity: value })),
+        counts: parsed.map(({ item, value }) => ({ item_id: item.id, counted_quantity: value })),
       })
       const shrinkage = audit.lines.filter((line) => line.variance < 0).length
       setNotice({
@@ -165,8 +167,8 @@ export default function Audits() {
         <p className="text-sm font-medium text-indigo-600">Inventory</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Stock Audits</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-500">
-          Enter what is physically on the shelves. Submitting sets each counted item&apos;s stock to the count and logs the
-          variance.
+          Enter what is physically on the shelves for every item in the list (0 if none is left). The audit is submitted
+          as one complete batch: it sets each item&apos;s stock to the count and logs the variance.
         </p>
       </header>
 
@@ -232,7 +234,7 @@ export default function Audits() {
                       const bad = Number.isNaN(value)
                       const variance = value === null || bad ? null : value - item.quantity
                       return (
-                        <tr key={item.id} className={value !== null && !bad ? 'bg-indigo-50/40' : ''}>
+                        <tr key={item.id} className={value === null ? 'bg-amber-50/60' : bad ? '' : 'bg-indigo-50/40'}>
                           <td className="px-4 py-2.5 font-medium">
                             <ItemName item={item} />
                           </td>
@@ -247,11 +249,14 @@ export default function Audits() {
                               onChange={(e) => setCounts((prev) => ({ ...prev, [item.id]: e.target.value }))}
                               aria-label={`Counted ${item.name} in ${item.unit}`}
                               aria-invalid={bad}
+                              required
                               placeholder="—"
                               className={`w-24 rounded-md border px-2 py-1 text-right tabular-nums focus:outline-none focus:ring-2 ${
                                 bad
                                   ? 'border-red-400 focus:ring-red-500/30'
-                                  : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500/30'
+                                  : value === null
+                                    ? 'border-amber-400 focus:border-amber-500 focus:ring-amber-500/30'
+                                    : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500/30'
                               }`}
                             />
                             <span className="ml-1.5 inline-block w-8 text-left text-slate-400">{item.unit}</span>
@@ -301,7 +306,12 @@ export default function Audits() {
               <ClipboardCheck className="size-4" aria-hidden="true" />
               {entered.length} of {visible.length} counted
               {invalid.length > 0 && <span className="text-red-700"> · {invalid.length} invalid (use numbers ≥ 0)</span>}
-              {entered.length > 0 && entered.length < visible.length && ' · items left blank keep their current stock'}
+              {blank > 0 && (
+                <span className="text-amber-700">
+                  {' '}
+                  · {blank} still blank: every row needs a count (enter 0 if none is left) before you can submit
+                </span>
+              )}
             </p>
           </form>
         </>

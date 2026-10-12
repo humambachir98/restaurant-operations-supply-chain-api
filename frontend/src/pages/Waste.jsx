@@ -132,7 +132,7 @@ export default function Waste() {
       subtitle: `End of day ${todayInBerlin()}`,
       filename: `waste-checklist-${todayInBerlin()}.pdf`,
       sections: [
-        { title: 'Menu Items / Burgers', head: WASTE_HEAD, body: wasteRows(menuItems, (m) => m.name), columnStyles: WASTE_COLUMNS },
+        { title: 'Menu Items / Burgers', head: WASTE_HEAD, body: wasteRows(menuItems, () => '-'), columnStyles: WASTE_COLUMNS },
         { title: 'Raw Ingredients', head: WASTE_HEAD, body: wasteRows(all), columnStyles: WASTE_COLUMNS },
       ],
     })

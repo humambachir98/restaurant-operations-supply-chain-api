@@ -1,4 +1,4 @@
-import { formatNumber, itemLabel } from './format.js'
+import { formatNumber } from './format.js'
 
 const BLANK = ''
 
@@ -43,19 +43,36 @@ export async function downloadChecklist({ title, subtitle, sections, filename })
   doc.save(filename)
 }
 
-/** Freezer-count rows: name with packaging, system stock, then blank Cartons / Bags / Pieces. */
+/**
+ * How to multiply up a count, for the floor staff: "1 Carton = 4 Bags | 1 Bag = 12 Pcs".
+ * Loose kg / L goods have no piece packaging: their supplier pack ("1 Carton = 15 kg"), or just the unit.
+ */
+export function packagingInfo(item) {
+  const { units_per_carton: perCarton, units_per_subpackage: perBag } = item
+  if (perCarton && perBag) {
+    const bags = perCarton / perBag
+    const carton = Number.isInteger(bags) ? `1 Carton = ${bags} Bags` : `1 Carton = ${perCarton} Pcs`
+    return `${carton} | 1 Bag = ${perBag} Pcs`
+  }
+  if (perCarton) return `1 Carton = ${perCarton} Pcs`
+  if (perBag) return `1 Bag = ${perBag} Pcs`
+  if (item.pack_size > 1) return `1 Carton = ${formatNumber(item.pack_size)} ${item.unit}`
+  return `Count in ${item.unit}`
+}
+
+/** Blind-count rows: name and packaging maths, then blank Cartons / Bags / Pieces. No system stock. */
 export function countingRows(items) {
-  return items.map((item) => [itemLabel(item), `${formatNumber(item.quantity)} ${item.unit}`, BLANK, BLANK, BLANK])
+  return items.map((item) => [item.name, packagingInfo(item), BLANK, BLANK, BLANK])
 }
 
-export const COUNTING_HEAD = ['Item Name', 'System Quantity', 'Cartons', 'Bags/Subs', 'Pieces']
+export const COUNTING_HEAD = ['Item Name', 'Packaging Info', 'Cartons', 'Bags/Subs', 'Pieces']
 // Room to write in the blank columns.
-export const COUNTING_COLUMNS = { 1: { cellWidth: 80, halign: 'right' }, 2: { cellWidth: 60 }, 3: { cellWidth: 60 }, 4: { cellWidth: 60 } }
+export const COUNTING_COLUMNS = { 1: { cellWidth: 150 }, 2: { cellWidth: 55 }, 3: { cellWidth: 55 }, 4: { cellWidth: 55 } }
 
-/** Waste rows: name with packaging, then blank Waste Amount and Reason. */
-export function wasteRows(items, label = itemLabel) {
-  return items.map((item) => [label(item), BLANK, BLANK])
+/** Waste rows: name, packaging maths ('-' for menu items), then blank Waste Amount and Reason. */
+export function wasteRows(items, info = packagingInfo) {
+  return items.map((item) => [item.name, info(item), BLANK, BLANK])
 }
 
-export const WASTE_HEAD = ['Item Name', 'Waste Amount', 'Reason']
-export const WASTE_COLUMNS = { 1: { cellWidth: 80 }, 2: { cellWidth: 170 } }
+export const WASTE_HEAD = ['Item Name', 'Packaging Info', 'Waste Amount', 'Reason']
+export const WASTE_COLUMNS = { 1: { cellWidth: 140 }, 2: { cellWidth: 70 }, 3: { cellWidth: 130 } }

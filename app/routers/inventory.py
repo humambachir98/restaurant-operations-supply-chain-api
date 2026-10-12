@@ -76,11 +76,13 @@ def list_daily_items(db: Session = Depends(get_db)):
 def submit_audit(payload: InventoryAuditCreate, db: Session = Depends(get_db)):
     """Record a physical count: stock is set to the counted quantity and the variance is logged.
 
-    `daily` audits may only contain Key Items (`is_daily_tracked`); `weekly` and `monthly`
-    accept any item. Items left out keep their current stock.
+    Audits are complete counts, submitted as one batch: a `daily` audit must contain exactly
+    every Key Item (`is_daily_tracked`), a `weekly` or `monthly` audit every item in stock.
+    Anything missing is rejected, so a skipped row can't pass as "checked".
     """
     items = get_items_or_400(db, (count.item_id for count in payload.counts))
 
+    expected_query = select(InventoryItem).order_by(InventoryItem.name)
     if payload.audit_type == AuditType.daily:
         not_daily = sorted(item_id for item_id, item in items.items() if not item.is_daily_tracked)
         if not_daily:
@@ -88,6 +90,17 @@ def submit_audit(payload: InventoryAuditCreate, db: Session = Depends(get_db)):
                 status.HTTP_400_BAD_REQUEST,
                 f"Daily audits may only include daily-tracked Key Items; not daily-tracked: {not_daily}",
             )
+        expected_query = expected_query.where(InventoryItem.is_daily_tracked.is_(True))
+
+    missing = [item for item in db.scalars(expected_query) if item.id not in items]
+    if missing:
+        scope = "every Key Item" if payload.audit_type == AuditType.daily else "every inventory item"
+        names = ", ".join(f"{item.name} (id {item.id})" for item in missing)
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Incomplete {payload.audit_type.value} audit: {scope} must be counted (enter 0 if none is left). "
+            f"Missing {len(missing)}: {names}",
+        )
 
     audit = InventoryAudit(audit_type=payload.audit_type, notes=payload.notes)
     for count in payload.counts:

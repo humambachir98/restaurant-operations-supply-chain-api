@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-160%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-164%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -167,10 +167,11 @@ stock would hide these errors instead of showing them.
 | `audit_type` | `daily` | `weekly` · `monthly` |
 | Purpose | Quick check of high-value, fast-moving items | Full stock-take |
 | Scope | Only items flagged `is_daily_tracked` (patties, buns, fries, oil, …) | Any item |
-| Enforcement | Including a non-Key item returns `400` | — |
+| Enforcement | Must contain **every** Key Item; a non-Key item returns `400` | Must contain **every** item |
 | Item list | `GET /inventory/daily-items` | `GET /inventory/` |
 
-  Items left out of an audit keep their current stock.
+  **Audits are complete counts.** A missing item returns `400` naming what wasn't counted, and
+  nothing is applied. A row can't be skipped as "checked": enter `0` if none is left.
 - **Batch waste and transfers, built for the end-of-day rush.** `POST /waste/` books a whole
   list of wasted items at once (`{"items": [{item_id, quantity, reason?}]}`) and deducts each.
   `POST /transfers/` records a transfer list with one other store
@@ -270,7 +271,7 @@ app/
 ├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 160 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+tests/                 # 164 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with pack sizes and packaging, 7 burger recipes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -379,15 +380,17 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | --- | --- |
 | **Dashboard** (`/`) | Stock health, today's waste, recent transfers, open deliveries and complaints; the 18 Key Items |
 | **Restock Orders** (`/orders`) | Manual order builder for any item, plus a low-stock alerts panel whose "Add to Order" puts the suggested packs into the draft; upcoming deliveries |
-| **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter physical quantities, see the variance live, submit to set stock |
+| **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter a physical quantity for every listed item (Submit stays locked while any row is blank), see the variance live, submit the whole count as one batch |
 | **Waste** (`/waste`) | End-of-day booking: wasted burgers (broken down into ingredients) and raw items, enter only what was wasted, submit once |
 | **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
+| **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
 Item names in tables show their packaging, e.g. `Whopper Patties (Carton: 48 | Sub: 12)`. Audits, Waste and
 Transfers each have an **Active View / Monthly Archive** switch (past submissions per month, expandable and
-read-only) and a **Download PDF Checklist** button: audit and transfer sheets have blank Cartons / Bags/Subs /
-Pieces columns for counting in the freezer, the waste sheet has blank Waste Amount and Reason columns.
-| **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
+read-only) and a **Download PDF Checklist** button. The sheets are **blind counts**: they never show the system
+quantity, so staff can't copy the expected figure. Each row has a **Packaging Info** column with the maths for
+counting, e.g. `1 Carton = 4 Bags | 1 Bag = 12 Pcs` (loose goods: `1 Carton = 15 kg`). Audit and transfer sheets
+have blank Cartons / Bags/Subs / Pieces columns, the waste sheet blank Waste Amount and Reason columns.
 
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
 
@@ -419,7 +422,7 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **160 tests**, each running against a fresh in-memory database. They include:
+There are **164 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
@@ -430,6 +433,6 @@ There are **160 tests**, each running against a fresh in-memory database. They i
 - burger waste broken down by recipe (scaled quantities, auto-notes, rollback mid-recipe)
 - monthly archives grouped by batch on Berlin month boundaries; dashboard "today" resetting exactly at Berlin midnight
 - dashboard summary figures; monthly audits; migration downgrade keeping monthly audits as weekly
-- daily vs. weekly audit rules and variance logging
+- daily vs. weekly audit rules, full-count enforcement (missing items rejected) and variance logging
 - migrations: model/migration drift, full downgrade, and the data backfills for existing rows (incl. batch ids per past submission)
 - seed script idempotency

@@ -127,7 +127,13 @@ def test_daily_audit_rejects_non_daily_items(client):
     # The same counts are fine in a weekly audit.
     weekly = client.post(
         "/inventory/audit",
-        json={"audit_type": "weekly", "counts": [{"item_id": napkins["id"], "counted_quantity": 40}]},
+        json={
+            "audit_type": "weekly",
+            "counts": [
+                {"item_id": patties["id"], "counted_quantity": 8},
+                {"item_id": napkins["id"], "counted_quantity": 40},
+            ],
+        },
     )
     assert weekly.status_code == 201
 
@@ -269,7 +275,7 @@ def test_receive_rolls_back_if_a_stock_update_fails(client, monkeypatch):
 def test_monthly_audit_counts_any_item_and_overwrites_stock(client):
     patties = _item(client, "Patties", quantity=100, daily=True)
     napkins = _item(client, "Napkins", quantity=-20)  # not a Key Item; negative after mis-rings
-    untouched = _item(client, "Straws", quantity=50)
+    straws = _item(client, "Straws", quantity=50)
 
     resp = client.post(
         "/inventory/audit",
@@ -278,16 +284,19 @@ def test_monthly_audit_counts_any_item_and_overwrites_stock(client):
             "counts": [
                 {"item_id": patties["id"], "counted_quantity": 96},
                 {"item_id": napkins["id"], "counted_quantity": 1500},
+                {"item_id": straws["id"], "counted_quantity": 50},
             ],
         },
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["audit_type"] == "monthly"
-    assert {line["item_id"]: line["variance"] for line in resp.json()["lines"]} == {patties["id"]: -4, napkins["id"]: 1520}
+    assert {line["item_id"]: line["variance"] for line in resp.json()["lines"]} == {
+        patties["id"]: -4, napkins["id"]: 1520, straws["id"]: 0,
+    }
 
     assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 96
     assert client.get(f"/inventory/{napkins['id']}").json()["quantity"] == 1500
-    assert client.get(f"/inventory/{untouched['id']}").json()["quantity"] == 50  # not counted: kept
+    assert client.get(f"/inventory/{straws['id']}").json()["quantity"] == 50
     assert [a["audit_type"] for a in client.get("/inventory/audits?audit_type=monthly").json()] == ["monthly"]
 
 
@@ -299,3 +308,49 @@ def test_full_audits_accept_non_key_items(client, audit_type):
         json={"audit_type": audit_type, "counts": [{"item_id": napkins["id"], "counted_quantity": 7}]},
     )
     assert resp.status_code == 201, resp.text
+
+
+# --- Full audit enforcement ---
+
+
+def test_daily_audit_missing_a_key_item_is_rejected(client):
+    patties = _item(client, "Patties", quantity=100, daily=True)
+    buns = _item(client, "Buns", quantity=40, daily=True)
+    _item(client, "Napkins", quantity=50)  # not a Key Item: not required daily
+
+    resp = client.post(
+        "/inventory/audit",
+        json={"audit_type": "daily", "counts": [{"item_id": patties["id"], "counted_quantity": 90}]},
+    )
+    assert resp.status_code == 400
+    assert "Incomplete daily audit" in resp.json()["detail"]
+    assert f"Buns (id {buns['id']})" in resp.json()["detail"]
+    assert "Napkins" not in resp.json()["detail"]
+    # Nothing applied, not even the counted line.
+    assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 100
+    assert client.get("/inventory/audits").json() == []
+
+
+@pytest.mark.parametrize("audit_type", ["weekly", "monthly"])
+def test_full_audit_missing_any_item_is_rejected(client, audit_type):
+    patties = _item(client, "Patties", quantity=100, daily=True)
+    napkins = _item(client, "Napkins", quantity=50)
+
+    resp = client.post(
+        "/inventory/audit",
+        json={"audit_type": audit_type, "counts": [{"item_id": patties["id"], "counted_quantity": 90}]},
+    )
+    assert resp.status_code == 400
+    assert f"Incomplete {audit_type} audit" in resp.json()["detail"]
+    assert f"Napkins (id {napkins['id']})" in resp.json()["detail"]
+    assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 100
+
+
+def test_complete_audit_accepts_zero_counts(client):
+    patties = _item(client, "Patties", quantity=12, daily=True)
+    resp = client.post(
+        "/inventory/audit",
+        json={"audit_type": "daily", "counts": [{"item_id": patties["id"], "counted_quantity": 0}]},
+    )
+    assert resp.status_code == 201, resp.text
+    assert client.get(f"/inventory/{patties['id']}").json()["quantity"] == 0
