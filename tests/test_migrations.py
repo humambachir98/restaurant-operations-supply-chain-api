@@ -88,7 +88,7 @@ def test_monthly_audits_survive_downgrade_as_weekly(tmp_path):
 def test_waste_without_reason_survives_downgrade(tmp_path):
     url = f"sqlite:///{(tmp_path / 'waste.db').as_posix()}"
     config = alembic_config(url)
-    command.upgrade(config, "head")
+    command.upgrade(config, "9b8577d15a6d")  # before batch ids
 
     engine = create_engine(url)
     with engine.begin() as conn:
@@ -109,4 +109,40 @@ def test_waste_without_reason_survives_downgrade(tmp_path):
     command.upgrade(config, "head")  # and back up again
     with engine.connect() as conn:
         assert "audit_type" not in {c["name"] for c in inspect(conn).get_columns("waste_logs")}
+    engine.dispose()
+
+
+def test_batch_id_migration_groups_existing_rows_by_submission(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'batches.db').as_posix()}"
+    config = alembic_config(url)
+    command.upgrade(config, "9b8577d15a6d")  # before batch ids
+
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO inventory_items (id, name, unit, quantity, reorder_level, is_daily_tracked, pack_size) "
+            "VALUES (1, 'Fries', 'kg', 0, 0, 1, 15), (2, 'Buns', 'pcs', 0, 0, 1, 30)"
+        ))
+        # Two bookings: lines of one booking share a timestamp.
+        conn.execute(text(
+            "INSERT INTO waste_logs (id, item_id, quantity, created_at) VALUES "
+            "(1, 1, 2, '2026-10-11 20:00:00'), (2, 2, 3, '2026-10-11 20:00:00'), (3, 1, 1, '2026-10-12 20:00:00')"
+        ))
+        # Same timestamp but different stores: two transfer lists.
+        conn.execute(text(
+            "INSERT INTO store_transfers (id, item_id, quantity, direction, target_store_name, created_at) VALUES "
+            "(1, 1, 5, 'out', 'Potsdam', '2026-10-12 10:00:00'), (2, 2, 5, 'out', 'Potsdam', '2026-10-12 10:00:00'), "
+            "(3, 2, 5, 'in', 'Spandau', '2026-10-12 10:00:00')"
+        ))
+
+    command.upgrade(config, "head")
+    with engine.connect() as conn:
+        waste = conn.execute(text("SELECT batch_id FROM waste_logs ORDER BY id")).scalars().all()
+        transfers = conn.execute(text("SELECT batch_id FROM store_transfers ORDER BY id")).scalars().all()
+    assert waste[0] == waste[1] != waste[2]
+    assert transfers[0] == transfers[1] != transfers[2]
+    assert None not in waste + transfers
+
+    command.downgrade(config, "9b8577d15a6d")
+    assert "menu_items" not in inspect(engine).get_table_names()
     engine.dispose()

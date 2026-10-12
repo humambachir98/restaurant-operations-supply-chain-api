@@ -27,6 +27,8 @@ class InventoryAuditLineRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     item_id: int
+    item_name: str
+    unit: str
     expected_quantity: float
     counted_quantity: float
     variance: float

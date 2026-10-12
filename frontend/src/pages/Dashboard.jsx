@@ -15,6 +15,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import Banner from '../components/Banner.jsx'
+import ItemName from '../components/ItemName.jsx'
 import { formatDateTime, formatNumber as fmt, formatSigned } from '../format.js'
 import { useFetch } from '../useFetch.js'
 
@@ -279,7 +280,9 @@ export default function Dashboard() {
                         <td className="px-4 py-3 font-medium">
                           <span className="inline-flex items-center gap-2">
                             <Package className="size-4 text-slate-400" aria-hidden="true" />
-                            {item.name}
+                            <span>
+                              <ItemName item={item} />
+                            </span>
                           </span>
                         </td>
                         <td className={`px-4 py-3 text-right tabular-nums ${status === 'negative' ? 'font-semibold text-red-700' : ''}`}>

@@ -8,7 +8,9 @@ Safe to run repeatedly: each employee (by email) and inventory item (by name) is
 inserted if it doesn't exist yet. Existing rows are never otherwise modified, so live stock
 levels, reorder levels and roles are not reset. The one exception: an existing item whose
 pack_size is still the default 1.0 (e.g. created before pack sizes existed) gets its seed
-pack size.
+pack size, and items without packaging info get the seed packaging.
+
+Menu items (with their recipes) are added by name if missing; existing recipes are kept.
 """
 
 from dataclasses import dataclass
@@ -18,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.database.migrations import upgrade_to_head
-from app.models import Employee, EmployeeRole, InventoryItem
+from app.models import Employee, EmployeeRole, InventoryItem, MenuItem, RecipeIngredient
 
 EMPLOYEES = [
     {"name": "Sabine Krüger", "role": EmployeeRole.shift_manager, "email": "sabine.krueger@example.com"},
@@ -61,6 +63,38 @@ NON_KEY_ITEMS = [
     ("Cleaning Supplies (Degreaser)", "L", 20, 5, 5),
 ]
 
+# Physical packaging for counting by hand: (pieces per carton, pieces per bag/sleeve in it).
+# A carton is one supplier pack. Loose kg / L goods have no piece count and are left out.
+PACKAGING = {
+    "Whopper Patties": (48, 12),
+    "Hamburger Patties": (96, 24),
+    "Chicken Patties": (48, 12),
+    "Sesame Buns": (30, 6),
+    "Regular Buns": (48, 12),
+    "Long Buns": (24, 6),
+    "Cheese Slices": (200, 50),
+    "Bacon Strips": (150, 25),
+    "Ketchup Packets": (1000, 250),
+    "BBQ Sauce Dips": (200, 50),
+    "Napkins": (2500, 250),
+    "Drink Cups 0.4 L": (500, 50),
+    "Drink Lids": (500, 100),
+    "Paper Straws": (1000, 250),
+    "Burger Wrappers": (1000, 500),
+    "Takeaway Bags": (250, 50),
+}
+
+# Bill of materials per menu item: inventory item name -> quantity per burger (stock unit).
+MENU_ITEMS = {
+    "Whopper": {"Whopper Patties": 1, "Sesame Buns": 1},
+    "Double Whopper": {"Whopper Patties": 2, "Sesame Buns": 1},
+    "Whopper Cheese": {"Whopper Patties": 1, "Sesame Buns": 1, "Cheese Slices": 2},
+    "Hamburger": {"Hamburger Patties": 1, "Regular Buns": 1},
+    "Cheeseburger": {"Hamburger Patties": 1, "Regular Buns": 1, "Cheese Slices": 1},
+    "Bacon Double Cheeseburger": {"Hamburger Patties": 2, "Regular Buns": 1, "Cheese Slices": 2, "Bacon Strips": 2},
+    "Long Chicken": {"Chicken Patties": 1, "Long Buns": 1},
+}
+
 
 DEFAULT_PACK_SIZE = 1.0  # what the migration gave items that existed before pack sizes
 
@@ -70,10 +104,12 @@ class SeedResult:
     employees_added: int
     items_added: int
     pack_sizes_set: int = 0
+    packaging_set: int = 0
+    menu_items_added: int = 0
 
 
 def seed(db: Session) -> SeedResult:
-    """Insert any seed rows that are missing and fill in unset pack sizes. The caller commits."""
+    """Insert any seed rows that are missing and fill in unset pack sizes / packaging. The caller commits."""
     existing_emails = set(db.scalars(select(Employee.email)))
     new_employees = [Employee(**e) for e in EMPLOYEES if e["email"] not in existing_emails]
 
@@ -95,8 +131,37 @@ def seed(db: Session) -> SeedResult:
     ]
 
     db.add_all(new_employees + new_items)
+
+    items_by_name = existing | {item.name: item for item in new_items}
+    packaging_set = 0
+    for name, (per_carton, per_sub) in PACKAGING.items():
+        item = items_by_name.get(name)
+        if item is not None and item.units_per_carton is None and item.units_per_subpackage is None:
+            item.units_per_carton, item.units_per_subpackage = per_carton, per_sub
+            if name in existing:
+                packaging_set += 1
+
+    existing_menu = set(db.scalars(select(MenuItem.name)))
+    new_menu_items = [
+        MenuItem(
+            name=name,
+            ingredients=[
+                RecipeIngredient(item=items_by_name[item_name], quantity_needed=qty)
+                for item_name, qty in recipe.items()
+            ],
+        )
+        for name, recipe in MENU_ITEMS.items()
+        # Skip a recipe whose ingredient was renamed or deleted rather than guessing.
+        if name not in existing_menu and all(item_name in items_by_name for item_name in recipe)
+    ]
+    db.add_all(new_menu_items)
+
     return SeedResult(
-        employees_added=len(new_employees), items_added=len(new_items), pack_sizes_set=pack_sizes_set
+        employees_added=len(new_employees),
+        items_added=len(new_items),
+        pack_sizes_set=pack_sizes_set,
+        packaging_set=packaging_set,
+        menu_items_added=len(new_menu_items),
     )
 
 
@@ -105,12 +170,13 @@ def main() -> None:
     with SessionLocal() as db, db.begin():
         result = seed(db)
 
-    if result == SeedResult(0, 0, 0):
+    if result == SeedResult(0, 0):
         print("Database already seeded; nothing to do.")
     else:
         print(
-            f"Seeded {result.employees_added} employee(s) and {result.items_added} inventory item(s); "
-            f"set the pack size on {result.pack_sizes_set} existing item(s)."
+            f"Seeded {result.employees_added} employee(s), {result.items_added} inventory item(s) and "
+            f"{result.menu_items_added} menu item(s); set the pack size on {result.pack_sizes_set} and "
+            f"the packaging on {result.packaging_set} existing item(s)."
         )
 
 

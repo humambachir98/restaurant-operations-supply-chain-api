@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import api, { errorMessage } from '../api.js'
 import Banner from '../components/Banner.jsx'
+import ItemName from '../components/ItemName.jsx'
 import ItemSelect, { fieldClass } from '../components/ItemSelect.jsx'
 import { formatDate, formatNumber as fmt } from '../format.js'
 import { useFetch } from '../useFetch.js'
@@ -235,7 +236,9 @@ export default function RestockOrders() {
                       if (!item) return null
                       return (
                         <tr key={line.itemId} className={packs === 0 ? 'text-slate-400' : ''}>
-                          <td className="px-4 py-2.5 font-medium">{item.name}</td>
+                          <td className="px-4 py-2.5 font-medium">
+                            <ItemName item={item} />
+                          </td>
                           <td className={`px-4 py-2.5 text-right tabular-nums ${item.quantity < 0 ? 'text-red-700' : ''}`}>
                             {fmt(item.quantity)} <span className="text-slate-400">{item.unit}</span>
                           </td>

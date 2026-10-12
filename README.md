@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-131%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-160%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -47,6 +47,7 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
 | Deliveries arrive short, damaged or with extras | **Complaints (Reklamation)** per order line, applied to stock only when a manager approves | Corrections leave an audit trail instead of silent edits |
 | Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly and end-of-month full audits** | Fast checks on the important items, full accuracy each week and month |
 | Stock leaves without a sale: waste, or lending to a nearby branch | **Waste log** and **store transfers** that update stock as they're recorded | Every movement is explained, so the count variance shrinks |
+| A dropped Whopper is a patty and a bun, not a line in the menu | **Bill of materials**: wasted burgers are broken down into their ingredients, each logged with a note like "(From wasted Whopper)" | Waste lands on the stock that was actually lost |
 | An area manager needs the picture at a glance | **Dashboard summary**: stock health, today's waste, recent transfers, open deliveries and complaints | One screen instead of five |
 
 ---
@@ -263,14 +264,14 @@ app/
 ├── scheduler.py       # APScheduler: daily auto-receive job, startup catch-up
 ├── database/          # Engine & session, UTC-storing/Berlin-returning DateTime type, migration helper
 ├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder,
-│                      #   Complaint, WasteLog, StoreTransfer
+│                      #   Complaint, WasteLog, StoreTransfer, MenuItem, RecipeIngredient
 ├── schemas/           # Pydantic request/response models and validation rules
 ├── routers/           # HTTP endpoints per resource
 ├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 131 tests: API, business rules, DST edge cases, scheduling, migrations, seed
-seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
+tests/                 # 160 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+seed.py                # Realistic sample data (staff, 28 items with pack sizes and packaging, 7 burger recipes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
 
@@ -286,9 +287,11 @@ Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redo
 | Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
 | Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
 | Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly\|monthly`) |
-| Waste | `POST /waste/` (batch) · `GET /waste/` (`?on=YYYY-MM-DD` Berlin day, `?limit=`) |
+| Menu items | `GET/POST /menu-items/` (recipes / bill of materials) |
+| Waste | `POST /waste/` (batch; each line an `item_id` or a `menu_item_id` that is broken down by its recipe) · `GET /waste/` (`?on=YYYY-MM-DD` Berlin day, `?limit=`) |
 | Transfers | `POST /transfers/` (batch, one store) · `GET /transfers/` (`?direction=in\|out`, `?limit=`) |
 | Dashboard | `GET /dashboard/summary` |
+| Archive | `GET /archive/waste` · `GET /archive/transfers` · `GET /archive/audits` (`?year=&month=` Berlin month, default current; submissions grouped by `batch_id`) |
 | Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/trigger-auto-receive` · `POST /purchase-orders/{id}/receive` |
 | Complaints | `GET/POST /complaints/` (`?status=pending\|approved\|rejected`) · `GET /complaints/{id}` · `POST /complaints/{id}/approve` · `POST /complaints/{id}/reject` |
 | Health | `GET /health` |
@@ -351,10 +354,12 @@ python seed.py
 ```
 
 This adds 3 employees (1 shift manager, 2 crew), 18 daily-tracked Key Items and 10 other items,
-each with a realistic supplier pack size (e.g. fries in 15 kg boxes, patties 48 per box). It
+each with a realistic supplier pack size (e.g. fries in 15 kg boxes, patties 48 per box) and,
+for piece goods, its packaging (e.g. 48 patties per carton in bags of 12). It also adds 7 menu
+items with their recipes (e.g. Whopper = 1 Whopper patty + 1 sesame bun) for burger waste. It
 can be run again safely: existing rows are matched by email or name and never overwritten, so
-live stock is kept. The one exception: an item whose `pack_size` is still the default `1.0`
-gets its seed value.
+live stock is kept. The exceptions: an item whose `pack_size` is still the default `1.0`, or
+that has no packaging yet, gets its seed value.
 
 ### 5. Start the API
 
@@ -375,8 +380,13 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | **Dashboard** (`/`) | Stock health, today's waste, recent transfers, open deliveries and complaints; the 18 Key Items |
 | **Restock Orders** (`/orders`) | Manual order builder for any item, plus a low-stock alerts panel whose "Add to Order" puts the suggested packs into the draft; upcoming deliveries |
 | **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter physical quantities, see the variance live, submit to set stock |
-| **Waste** (`/waste`) | End-of-day booking: every item in one searchable list, enter only what was wasted, submit once |
+| **Waste** (`/waste`) | End-of-day booking: wasted burgers (broken down into ingredients) and raw items, enter only what was wasted, submit once |
 | **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
+
+Item names in tables show their packaging, e.g. `Whopper Patties (Carton: 48 | Sub: 12)`. Audits, Waste and
+Transfers each have an **Active View / Monthly Archive** switch (past submissions per month, expandable and
+read-only) and a **Download PDF Checklist** button: audit and transfer sheets have blank Cartons / Bags/Subs /
+Pieces columns for counting in the freezer, the waste sheet has blank Waste Amount and Reason columns.
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
@@ -409,7 +419,7 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **131 tests**, each running against a fresh in-memory database. They include:
+There are **160 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
@@ -417,7 +427,9 @@ There are **131 tests**, each running against a fresh in-memory database. They i
 - automated receiving: due today vs. later, catch-up after downtime, idempotency, one failing order not blocking others, the 06:00 job across the DST change
 - complaints: approve/reject apply stock once, validation against the delivered quantity
 - batch waste and transfers: every line applied, all-or-nothing on invalid lines and mid-batch failures, Berlin-day filtering (incl. 25-hour DST days)
+- burger waste broken down by recipe (scaled quantities, auto-notes, rollback mid-recipe)
+- monthly archives grouped by batch on Berlin month boundaries; dashboard "today" resetting exactly at Berlin midnight
 - dashboard summary figures; monthly audits; migration downgrade keeping monthly audits as weekly
 - daily vs. weekly audit rules and variance logging
-- migrations: model/migration drift, full downgrade, and the data backfill for existing rows
+- migrations: model/migration drift, full downgrade, and the data backfills for existing rows (incl. batch ids per past submission)
 - seed script idempotency

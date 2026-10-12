@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from app.models import TransferDirection
-from app.schemas.common import ensure_unique_item_ids
+from app.schemas.common import ensure_unique, ensure_unique_item_ids
 
 # Trimmed before the length check, so whitespace-only text is rejected.
 StoreName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
@@ -13,8 +13,13 @@ MAX_BATCH = 500
 
 
 class WasteLineCreate(BaseModel):
-    item_id: int
-    quantity: float = Field(gt=0, description="Amount thrown away, in the item's stock unit")
+    """Either a raw inventory item, or a finished menu item that is broken down by its recipe."""
+
+    item_id: int | None = None
+    menu_item_id: int | None = None
+    quantity: float = Field(
+        gt=0, description="Amount thrown away: in the item's stock unit, or the number of menu items"
+    )
     reason: str | None = Field(default=None, max_length=500, examples=["Fries held past 7 minutes"])
 
     @field_validator("reason", mode="before")
@@ -24,15 +29,22 @@ class WasteLineCreate(BaseModel):
             return value.strip() or None
         return value
 
+    @model_validator(mode="after")
+    def check_exactly_one_target(self):
+        if (self.item_id is None) == (self.menu_item_id is None):
+            raise ValueError("Give exactly one of item_id or menu_item_id")
+        return self
+
 
 class WasteBatchCreate(BaseModel):
-    """An end-of-day waste booking: one line per item that had waste."""
+    """An end-of-day waste booking: one line per raw item and per menu item that had waste."""
 
     items: list[WasteLineCreate] = Field(min_length=1, max_length=MAX_BATCH)
 
     @model_validator(mode="after")
     def check_unique_items(self):
-        ensure_unique_item_ids(self.items)
+        ensure_unique((line.item_id for line in self.items if line.item_id is not None), "item_id")
+        ensure_unique((line.menu_item_id for line in self.items if line.menu_item_id is not None), "menu_item_id")
         return self
 
 
@@ -45,6 +57,7 @@ class WasteLogRead(BaseModel):
     unit: str
     quantity: float
     reason: str | None
+    batch_id: str
     created_at: datetime
 
 
@@ -77,4 +90,5 @@ class StoreTransferRead(BaseModel):
     direction: TransferDirection
     stock_change: float  # +quantity for 'in', -quantity for 'out'
     target_store_name: str
+    batch_id: str
     created_at: datetime

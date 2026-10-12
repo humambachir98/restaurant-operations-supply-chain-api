@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from app.database.types import LocalDateTime
 from app.utils.time import now_local
+
+if TYPE_CHECKING:
+    from app.models.inventory import InventoryItem
 
 
 class AuditType(enum.StrEnum):
@@ -43,3 +47,12 @@ class InventoryAuditLine(Base):
     variance: Mapped[float]  # counted - expected; negative means shrinkage
 
     audit: Mapped[InventoryAudit] = relationship(back_populates="lines")
+    item: Mapped["InventoryItem"] = relationship(lazy="joined")
+
+    @property
+    def item_name(self) -> str:
+        return self.item.name
+
+    @property
+    def unit(self) -> str:
+        return self.item.unit

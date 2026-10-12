@@ -18,3 +18,7 @@ class InventoryItem(Base):
     pack_size: Mapped[float] = mapped_column(default=1.0, server_default="1.0")
     # Key Items that are physically counted every day (in addition to the weekly audit).
     is_daily_tracked: Mapped[bool] = mapped_column(default=False, index=True)
+    # Physical packaging, for counting by hand (e.g. 48 patties per carton in bags of 12).
+    # In pieces; left empty where it doesn't apply (loose kg / L goods).
+    units_per_carton: Mapped[int | None]
+    units_per_subpackage: Mapped[int | None]

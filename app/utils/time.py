@@ -33,3 +33,12 @@ def local_day_bounds(day: date) -> tuple[datetime, datetime]:
         datetime.combine(day, time.min, tzinfo=LOCAL_TZ),
         datetime.combine(day + timedelta(days=1), time.min, tzinfo=LOCAL_TZ),
     )
+
+
+def local_month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
+    """[start, end) of a calendar month in the restaurant's zone."""
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return (
+        datetime(year, month, 1, tzinfo=LOCAL_TZ),
+        datetime(next_year, next_month, 1, tzinfo=LOCAL_TZ),
+    )

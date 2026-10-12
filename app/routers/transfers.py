@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,9 +34,9 @@ def record_transfers(payload: TransferBatchCreate, db: Session = Depends(get_db)
     All or nothing: one transaction, so an invalid line or a failure leaves stock untouched.
     """
     get_items_or_400(db, (line.item_id for line in payload.items))
-    recorded_at = now_local()
+    batch = {"batch_id": str(uuid.uuid4()), "created_at": now_local()}
     transfers = [
-        StoreTransfer(**line.model_dump(), target_store_name=payload.target_store_name, created_at=recorded_at)
+        StoreTransfer(**line.model_dump(), target_store_name=payload.target_store_name, **batch)
         for line in payload.items
     ]
     try:

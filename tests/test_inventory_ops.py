@@ -59,7 +59,8 @@ def test_audit_sets_quantities_and_logs_variance(client):
     assert audit["audit_type"] == "daily"
     lines = {line["item_id"]: line for line in audit["lines"]}
     assert lines[patties["id"]] == {
-        "item_id": patties["id"], "expected_quantity": 100, "counted_quantity": 92, "variance": -8,
+        "item_id": patties["id"], "item_name": "Patties", "unit": "pcs",
+        "expected_quantity": 100, "counted_quantity": 92, "variance": -8,
     }
     assert lines[buns["id"]]["variance"] == 15
 

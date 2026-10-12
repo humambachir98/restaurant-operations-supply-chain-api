@@ -36,6 +36,7 @@ class WasteLog(_ItemDetails, Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("inventory_items.id"), index=True)
     quantity: Mapped[float]  # in the item's stock unit, always positive
     reason: Mapped[str | None] = mapped_column(String(500))
+    batch_id: Mapped[str] = mapped_column(String(36), index=True)  # shared by one booking
     created_at: Mapped[datetime] = mapped_column(LocalDateTime, default=now_local, index=True)
 
     item: Mapped["InventoryItem"] = relationship(lazy="joined")
@@ -59,6 +60,7 @@ class StoreTransfer(_ItemDetails, Base):
         Enum(TransferDirection, values_callable=lambda e: [m.value for m in e], length=3)
     )
     target_store_name: Mapped[str] = mapped_column(String(100))  # the other store, either way
+    batch_id: Mapped[str] = mapped_column(String(36), index=True)  # shared by one transfer list
     created_at: Mapped[datetime] = mapped_column(LocalDateTime, default=now_local, index=True)
 
     item: Mapped["InventoryItem"] = relationship(lazy="joined")

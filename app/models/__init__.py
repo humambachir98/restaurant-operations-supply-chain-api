@@ -2,6 +2,7 @@ from app.models.audit import AuditType, InventoryAudit, InventoryAuditLine
 from app.models.complaint import Complaint, ComplaintStatus
 from app.models.employee import Employee, EmployeeRole
 from app.models.inventory import InventoryItem
+from app.models.menu import MenuItem, RecipeIngredient
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.models.shift import Shift
 from app.models.stock_movement import StoreTransfer, TransferDirection, WasteLog
@@ -11,6 +12,7 @@ __all__ = [
     "Complaint", "ComplaintStatus",
     "Employee", "EmployeeRole",
     "InventoryItem",
+    "MenuItem", "RecipeIngredient",
     "PurchaseOrder", "PurchaseOrderItem", "PurchaseOrderStatus",
     "Shift",
     "StoreTransfer", "TransferDirection", "WasteLog",

@@ -63,14 +63,17 @@ def test_waste_batch_deducts_every_line(client):
     resp = _book_waste(client, (fries, 2.5, "Held past 7 minutes"), (buns, 12))
     assert resp.status_code == 201, resp.text
     entries = resp.json()
-    assert [e | {"id": None, "created_at": None} for e in entries] == [
-        {"id": None, "created_at": None, "item_id": fries["id"], "item_name": "French Fries", "unit": "kg",
+    assert [e | {"id": None, "created_at": None, "batch_id": None} for e in entries] == [
+        {"id": None, "created_at": None, "batch_id": None, "item_id": fries["id"], "item_name": "French Fries", "unit": "kg",
          "quantity": 2.5, "reason": "Held past 7 minutes"},
-        {"id": None, "created_at": None, "item_id": buns["id"], "item_name": "Sesame Buns", "unit": "pcs",
-         "quantity": 12, "reason": None},
+        {"id": None, "created_at": None, "batch_id": None, "item_id": buns["id"], "item_name": "Sesame Buns",
+         "unit": "pcs", "quantity": 12, "reason": None},
     ]
-    assert entries[0]["created_at"] == entries[1]["created_at"]  # one booking, one timestamp
-    assert (_stock(client, fries), _stock(client, buns), _stock(client, lettuce)) == (17.5, 88, 5)
+    # One booking: one timestamp and one batch id.
+    assert entries[0]["created_at"] == entries[1]["created_at"]
+    assert entries[0]["batch_id"] == entries[1]["batch_id"]
+    assert _book_waste(client, (buns, 1)).json()[0]["batch_id"] != entries[0]["batch_id"]
+    assert (_stock(client, fries), _stock(client, buns), _stock(client, lettuce)) == (17.5, 87, 5)
 
 
 def test_waste_has_no_audit_type(client):
@@ -162,12 +165,15 @@ def test_transfer_list_moves_stock_both_ways(client):
     resp = _transfer(client, (buns, 30, "out"), (patties, 12, "in"), store="  Berlin Alexanderplatz ")
     assert resp.status_code == 201, resp.text
     lines = resp.json()
-    assert [line | {"id": None, "created_at": None} for line in lines] == [
-        {"id": None, "created_at": None, "item_id": buns["id"], "item_name": "Sesame Buns", "unit": "pcs",
-         "quantity": 30, "direction": "out", "stock_change": -30, "target_store_name": "Berlin Alexanderplatz"},
-        {"id": None, "created_at": None, "item_id": patties["id"], "item_name": "Patties", "unit": "pcs",
-         "quantity": 12, "direction": "in", "stock_change": 12, "target_store_name": "Berlin Alexanderplatz"},
+    assert [line | {"id": None, "created_at": None, "batch_id": None} for line in lines] == [
+        {"id": None, "created_at": None, "batch_id": None, "item_id": buns["id"], "item_name": "Sesame Buns",
+         "unit": "pcs", "quantity": 30, "direction": "out", "stock_change": -30,
+         "target_store_name": "Berlin Alexanderplatz"},
+        {"id": None, "created_at": None, "batch_id": None, "item_id": patties["id"], "item_name": "Patties",
+         "unit": "pcs", "quantity": 12, "direction": "in", "stock_change": 12,
+         "target_store_name": "Berlin Alexanderplatz"},
     ]
+    assert lines[0]["batch_id"] == lines[1]["batch_id"]
     assert (_stock(client, buns), _stock(client, patties)) == (70, 62)
 
     assert [t["direction"] for t in client.get("/transfers/").json()] == ["in", "out"]  # newest (highest id) first

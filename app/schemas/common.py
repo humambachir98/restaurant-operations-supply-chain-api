@@ -17,7 +17,11 @@ class _HasItemId(Protocol):
 
 
 def ensure_unique_item_ids(lines: Iterable[_HasItemId]) -> None:
-    counts = Counter(line.item_id for line in lines)
-    duplicates = sorted(item_id for item_id, n in counts.items() if n > 1)
+    ensure_unique((line.item_id for line in lines), "item_id")
+
+
+def ensure_unique(ids: Iterable[int], field: str) -> None:
+    counts = Counter(ids)
+    duplicates = sorted(value for value, n in counts.items() if n > 1)
     if duplicates:
-        raise ValueError(f"Each item may appear only once; duplicated item_id(s): {duplicates}")
+        raise ValueError(f"Each item may appear only once; duplicated {field}(s): {duplicates}")
