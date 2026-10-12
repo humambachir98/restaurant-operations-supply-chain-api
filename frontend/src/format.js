@@ -18,3 +18,6 @@ export const formatDateTime = (isoDateTime) => dateTimeFormat.format(new Date(is
 
 /** "+6" / "−30": explicit sign for stock changes. */
 export const formatSigned = (value) => (value > 0 ? '+' : value < 0 ? '−' : '') + numberFormat.format(Math.abs(value))
+
+/** Today's date in Berlin as YYYY-MM-DD (the API's notion of "today"). */
+export const todayInBerlin = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date())

@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-100%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-120%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -45,7 +45,9 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
 | Stock records don't match the shelves | **Negative stock is allowed**, and physical counts correct it while logging the variance | The system reflects reality, and shrinkage shows up |
 | Nobody should have to book in every delivery by hand | **Deliveries are received automatically at 06:00** on their delivery day, with catch-up after downtime | Stock is right before the morning shift starts |
 | Deliveries arrive short, damaged or with extras | **Complaints (Reklamation)** per order line, applied to stock only when a manager approves | Corrections leave an audit trail instead of silent edits |
-| Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly full audits**, as separate workflows | Fast checks on the important items, full accuracy each week |
+| Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly and end-of-month full audits** | Fast checks on the important items, full accuracy each week and month |
+| Stock leaves without a sale: waste, or lending to a nearby branch | **Waste log** and **store transfers** that update stock as they're recorded | Every movement is explained, so the count variance shrinks |
+| An area manager needs the picture at a glance | **Dashboard summary**: stock health, today's waste, recent transfers, open deliveries and complaints | One screen instead of five |
 
 ---
 
@@ -157,14 +159,21 @@ stock would hide these errors instead of showing them.
 - **Every count is an audit record.** `POST /inventory/audit` sets each counted item to the
   counted quantity and logs `expected`, `counted` and `variance = counted − expected`. A
   negative variance means shrinkage. History is at `GET /inventory/audits`.
-- **Two separate audit workflows:**
+- **Three audit types:**
 
-| | Daily Key-Item audit | Weekly full audit |
+| | Daily Key-Item audit | Weekly / end-of-month full audit |
 | --- | --- | --- |
+| `audit_type` | `daily` | `weekly` · `monthly` |
 | Purpose | Quick check of high-value, fast-moving items | Full stock-take |
 | Scope | Only items flagged `is_daily_tracked` (patties, buns, fries, oil, …) | Any item |
 | Enforcement | Including a non-Key item returns `400` | — |
 | Item list | `GET /inventory/daily-items` | `GET /inventory/` |
+
+  Items left out of an audit keep their current stock.
+- **Waste and store transfers.** `POST /waste/` records thrown-away stock (with a reason and the
+  daily/weekly/monthly period it's booked against) and deducts it. `POST /transfers/` records
+  stock sent to (`out`) or received from (`in`) another store. Each entry and its stock change
+  are saved in one transaction, so there's never a log without the stock change or vice versa.
 
 - **Validation that matches reality:** a *count* can't be negative, but a *stock balance* can.
   Each item may appear only once per audit or order. An audit with an unknown item changes
@@ -250,13 +259,14 @@ app/
 ├── config.py          # Settings from .env (time zone, order cut-off, auto-receive time, DB URL)
 ├── scheduler.py       # APScheduler: daily auto-receive job, startup catch-up
 ├── database/          # Engine & session, UTC-storing/Berlin-returning DateTime type, migration helper
-├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder, Complaint
+├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder,
+│                      #   Complaint, WasteLog, StoreTransfer
 ├── schemas/           # Pydantic request/response models and validation rules
 ├── routers/           # HTTP endpoints per resource
-├── services/          # Receiving logic shared by the scheduler, the trigger and the receive endpoint
+├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 100 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+tests/                 # 120 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -272,7 +282,10 @@ Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redo
 | Employees | `GET/POST /employees/` · `GET/PATCH/DELETE /employees/{id}` |
 | Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
 | Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
-| Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly`) |
+| Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly\|monthly`) |
+| Waste | `GET/POST /waste/` (`?on=YYYY-MM-DD` Berlin day, `?audit_type=`, `?limit=`) |
+| Transfers | `GET/POST /transfers/` (`?direction=in\|out`, `?limit=`) |
+| Dashboard | `GET /dashboard/summary` |
 | Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/trigger-auto-receive` · `POST /purchase-orders/{id}/receive` |
 | Complaints | `GET/POST /complaints/` (`?status=pending\|approved\|rejected`) · `GET /complaints/{id}` · `POST /complaints/{id}/approve` · `POST /complaints/{id}/reject` |
 | Health | `GET /health` |
@@ -356,8 +369,10 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 
 | Page | What it does |
 | --- | --- |
-| **Dashboard** (`/`) | The 18 daily Key Items with stock, reorder level, pack size and status |
-| **Restock Orders** (`/orders`) | Generate a smart restock draft, edit packs per line, submit it; see upcoming deliveries and their automatic delivery date |
+| **Dashboard** (`/`) | Stock health, today's waste, recent transfers, open deliveries and complaints; the 18 Key Items |
+| **Restock Orders** (`/orders`) | Manual order builder for any item, plus a low-stock alerts panel whose "Add to Order" puts the suggested packs into the draft; upcoming deliveries |
+| **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter physical quantities, see the variance live, submit to set stock |
+| **Waste & Transfers** (`/stock-movements`) | Log waste and store transfers; today's waste and recent transfers |
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
@@ -390,13 +405,15 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **100 tests**, each running against a fresh in-memory database. They include:
+There are **120 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
 - shift duration limits **across both DST changes**, and every kind of overlap (partial, contained, identical, back-to-back, reassignment)
 - automated receiving: due today vs. later, catch-up after downtime, idempotency, one failing order not blocking others, the 06:00 job across the DST change
 - complaints: approve/reject apply stock once, validation against the delivered quantity
+- waste and transfers: stock changes, atomic rollback, validation, Berlin-day filtering (incl. 25-hour DST days)
+- dashboard summary figures; monthly audits; migration downgrade keeping monthly audits as weekly
 - daily vs. weekly audit rules and variance logging
 - migrations: model/migration drift, full downgrade, and the data backfill for existing rows
 - seed script idempotency

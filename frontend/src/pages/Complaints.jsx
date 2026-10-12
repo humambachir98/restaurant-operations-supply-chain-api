@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import api, { errorMessage } from '../api.js'
 import Banner from '../components/Banner.jsx'
+import Segmented from '../components/Segmented.jsx'
 import { formatDateTime, formatNumber as fmt, formatSigned } from '../format.js'
 
 const RECENT_ORDERS = 10
@@ -10,27 +11,6 @@ const EMPTY_FORM = { orderId: '', itemId: '', kind: 'missing', amount: '', unitM
 
 const inputClass =
   'mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:bg-slate-50 disabled:text-slate-400'
-
-function Segmented({ label, options, value, onChange }) {
-  return (
-    <div role="radiogroup" aria-label={label} className="mt-1 inline-flex rounded-lg border border-slate-300 bg-slate-50 p-0.5">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-            value === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 export default function Complaints() {
   const [orders, setOrders] = useState(null) // recent received orders; null while loading

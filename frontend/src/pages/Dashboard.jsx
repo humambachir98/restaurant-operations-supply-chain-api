@@ -1,9 +1,22 @@
-import axios from 'axios'
-import { AlertTriangle, CheckCircle2, Package, RefreshCw, TrendingDown, WifiOff } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  AlertTriangle,
+  ArrowDownLeft,
+  ArrowRight,
+  ArrowUpRight,
+  CheckCircle2,
+  ClipboardX,
+  HeartPulse,
+  Package,
+  RefreshCw,
+  Trash2,
+  TrendingDown,
+  Truck,
+} from 'lucide-react'
+import { Link } from 'react-router-dom'
 
-import api, { errorMessage } from '../api.js'
-import { formatNumber as fmt } from '../format.js'
+import Banner from '../components/Banner.jsx'
+import { formatDateTime, formatNumber as fmt, formatSigned } from '../format.js'
+import { useFetch } from '../useFetch.js'
 
 // Mirrors the backend's low-stock rule: a reorder level of 0 means "not managed".
 function stockStatus(item) {
@@ -28,55 +41,178 @@ function StatusBadge({ status }) {
   )
 }
 
-function StatCard({ label, value, tone = 'text-slate-900' }) {
+function Card({ title, Icon, iconClass, link, children }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+    <section className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+          <Icon className={`size-4 ${iconClass}`} aria-hidden="true" />
+          {title}
+        </h2>
+        {link && (
+          <Link to={link.to} className="inline-flex items-center gap-0.5 text-xs font-medium text-indigo-600 hover:underline">
+            {link.label} <ArrowRight className="size-3" aria-hidden="true" />
+          </Link>
+        )}
+      </div>
+      <div className="mt-3 flex-1">{children}</div>
+    </section>
+  )
+}
+
+const Skeleton = ({ className = 'h-16' }) => <div className={`animate-pulse rounded-lg bg-slate-100 ${className}`} />
+
+function StockHealthCard({ health }) {
+  const parts = health
+    ? [
+        { key: 'ok', label: 'Healthy', value: health.ok, bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
+        { key: 'low', label: 'At reorder level', value: health.low, bar: 'bg-amber-400', dot: 'bg-amber-400' },
+        { key: 'negative', label: 'Negative', value: health.negative, bar: 'bg-red-500', dot: 'bg-red-500' },
+      ]
+    : []
+  const healthyPct = health?.total_items ? Math.round((health.ok / health.total_items) * 100) : null
+
+  return (
+    <Card title="Current stock health" Icon={HeartPulse} iconClass="text-emerald-600" link={{ to: '/orders', label: 'Alerts' }}>
+      {!health ? (
+        <Skeleton />
+      ) : (
+        <>
+          <p className="text-3xl font-semibold tabular-nums">
+            {healthyPct ?? '–'}
+            {healthyPct !== null && <span className="text-lg text-slate-400">%</span>}
+            <span className="ml-2 text-sm font-normal text-slate-500">of {health.total_items} items healthy</span>
+          </p>
+          <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            {parts.map((p) =>
+              p.value ? <div key={p.key} className={p.bar} style={{ width: `${(p.value / health.total_items) * 100}%` }} /> : null,
+            )}
+          </div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {parts.map((p) => (
+              <li key={p.key} className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-slate-600">
+                  <span className={`size-2 rounded-full ${p.dot}`} aria-hidden="true" />
+                  {p.label}
+                </span>
+                <span className="font-medium tabular-nums">{p.value}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function WasteCard({ waste }) {
+  return (
+    <Card title="Today's waste" Icon={Trash2} iconClass="text-red-600" link={{ to: '/stock-movements', label: 'Log waste' }}>
+      {!waste ? (
+        <Skeleton />
+      ) : (
+        <>
+          <p className="text-3xl font-semibold tabular-nums">
+            {waste.entries}
+            <span className="ml-2 text-sm font-normal text-slate-500">entr{waste.entries === 1 ? 'y' : 'ies'} today</span>
+          </p>
+          {waste.items.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">Nothing wasted so far today.</p>
+          ) : (
+            <ul className="mt-3 space-y-1 text-sm">
+              {waste.items.slice(0, 4).map((w) => (
+                <li key={w.item_id} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-slate-600">{w.item_name}</span>
+                  <span className="shrink-0 tabular-nums text-red-700">−{fmt(w.quantity)} {w.unit}</span>
+                </li>
+              ))}
+              {waste.items.length > 4 && <li className="text-xs text-slate-400">+{waste.items.length - 4} more items</li>}
+            </ul>
+          )}
+        </>
+      )}
+    </Card>
+  )
+}
+
+function TransfersCard({ transfers }) {
+  return (
+    <Card title="Recent transfers" Icon={ArrowUpRight} iconClass="text-indigo-600" link={{ to: '/stock-movements', label: 'Record' }}>
+      {!transfers ? (
+        <Skeleton />
+      ) : transfers.length === 0 ? (
+        <p className="text-sm text-slate-500">No transfers between stores yet.</p>
+      ) : (
+        <ul className="space-y-2 text-sm">
+          {transfers.map((t) => {
+            const incoming = t.direction === 'in'
+            const Icon = incoming ? ArrowDownLeft : ArrowUpRight
+            return (
+              <li key={t.id} className="flex items-start justify-between gap-2">
+                <span className="flex min-w-0 items-start gap-2">
+                  <Icon className={`mt-0.5 size-4 shrink-0 ${incoming ? 'text-emerald-600' : 'text-amber-600'}`} aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate">{t.item_name}</span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {incoming ? 'from' : 'to'} {t.target_store_name} · {formatDateTime(t.created_at)}
+                    </span>
+                  </span>
+                </span>
+                <span className={`shrink-0 tabular-nums ${incoming ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {formatSigned(t.stock_change)} {t.unit}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+function OpenWork({ summary }) {
+  const tiles = [
+    { to: '/orders', Icon: Truck, label: 'Deliveries scheduled', value: summary?.pending_deliveries, tone: 'text-sky-700' },
+    { to: '/complaints', Icon: ClipboardX, label: 'Complaints awaiting decision', value: summary?.pending_complaints, tone: 'text-amber-700' },
+  ]
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {tiles.map(({ to, Icon, label, value, tone }) => (
+        <Link
+          key={to}
+          to={to}
+          className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-indigo-300"
+        >
+          <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+            <Icon className="size-4 text-slate-400" aria-hidden="true" />
+            {label}
+          </span>
+          <span className={`text-xl font-semibold tabular-nums ${value ? tone : 'text-slate-400'}`}>{value ?? '–'}</span>
+        </Link>
+      ))}
     </div>
   )
 }
 
 export default function Dashboard() {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [reloadKey, setReloadKey] = useState(0)
+  const summary = useFetch('/dashboard/summary')
+  const keyItems = useFetch('/inventory/daily-items')
+  const loading = summary.loading || keyItems.loading
+  const data = summary.data
 
-  useEffect(() => {
-    const controller = new AbortController()
-    api
-      .get('/inventory/daily-items', { signal: controller.signal })
-      .then(({ data }) => {
-        setItems(data)
-        setError(null)
-        setLoading(false)
-      })
-      .catch((err) => {
-        if (axios.isCancel(err)) return
-        setError(errorMessage(err))
-        setLoading(false)
-      })
-    return () => controller.abort()
-  }, [reloadKey])
-
-  const refresh = () => {
-    setLoading(true)
-    setError(null)
-    setReloadKey((key) => key + 1)
+  function refresh() {
+    summary.reload()
+    keyItems.reload()
   }
-
-  const lowCount = items.filter((item) => stockStatus(item) === 'low').length
-  const negativeCount = items.filter((item) => stockStatus(item) === 'negative').length
 
   return (
     <>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-indigo-600">Daily count</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Key Items</h1>
+          <p className="text-sm font-medium text-indigo-600">Area manager</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Dashboard</h1>
           <p className="mt-1 text-sm text-slate-500">
-            High-turnover items checked every day. Stock below zero is corrected by the next count.
+            {data ? `Updated ${formatDateTime(data.generated_at)} (Berlin time)` : 'Loading the latest figures…'}
           </p>
         </div>
         <button
@@ -90,39 +226,44 @@ export default function Dashboard() {
         </button>
       </header>
 
-      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Summary">
-        <StatCard label="Key items" value={loading ? '–' : items.length} />
-        <StatCard label="At or below reorder level" value={loading ? '–' : lowCount} tone={lowCount ? 'text-amber-700' : undefined} />
-        <StatCard label="Negative stock" value={loading ? '–' : negativeCount} tone={negativeCount ? 'text-red-700' : undefined} />
-      </section>
+      {summary.error && <Banner tone="error" title="Couldn't load the dashboard.">{summary.error}</Banner>}
 
-      {error ? (
-        <div role="alert" className="mt-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <WifiOff className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <StockHealthCard health={data?.stock_health} />
+        <WasteCard waste={data?.waste_today} />
+        <TransfersCard transfers={data?.recent_transfers} />
+      </div>
+      <OpenWork summary={data} />
+
+      <section className="mt-10" aria-labelledby="key-items">
+        <div className="flex items-end justify-between gap-2">
           <div>
-            <p className="font-medium">Couldn't load the Key Items.</p>
-            <p className="mt-1">{error}</p>
-            <button type="button" onClick={refresh} className="mt-2 font-medium underline underline-offset-2">
-              Try again
-            </button>
+            <h2 id="key-items" className="font-semibold">Key Items</h2>
+            <p className="text-sm text-slate-500">High-turnover items counted every day.</p>
           </div>
+          <Link to="/audits" className="inline-flex items-center gap-0.5 text-sm font-medium text-indigo-600 hover:underline">
+            Start daily audit <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
         </div>
-      ) : (
-        <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Item</th>
-                  <th scope="col" className="px-4 py-3 text-right">Stock</th>
-                  <th scope="col" className="px-4 py-3 text-right">Reorder level</th>
-                  <th scope="col" className="px-4 py-3 text-right">Pack size</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading
-                  ? Array.from({ length: 8 }, (_, i) => (
+
+        {keyItems.error ? (
+          <Banner tone="error" title="Couldn't load the Key Items." className="mt-3">{keyItems.error}</Banner>
+        ) : (
+          <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th scope="col" className="px-4 py-3">Item</th>
+                    <th scope="col" className="px-4 py-3 text-right">Stock</th>
+                    <th scope="col" className="px-4 py-3 text-right">Reorder level</th>
+                    <th scope="col" className="px-4 py-3 text-right">Pack size</th>
+                    <th scope="col" className="px-4 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {!keyItems.data &&
+                    Array.from({ length: 8 }, (_, i) => (
                       <tr key={i} className="animate-pulse">
                         {Array.from({ length: 5 }, (_, j) => (
                           <td key={j} className="px-4 py-3.5">
@@ -130,44 +271,45 @@ export default function Dashboard() {
                           </td>
                         ))}
                       </tr>
-                    ))
-                  : items.map((item) => {
-                      const status = stockStatus(item)
-                      return (
-                        <tr key={item.id} className="transition hover:bg-slate-50">
-                          <td className="px-4 py-3 font-medium">
-                            <span className="inline-flex items-center gap-2">
-                              <Package className="size-4 text-slate-400" aria-hidden="true" />
-                              {item.name}
-                            </span>
-                          </td>
-                          <td className={`px-4 py-3 text-right tabular-nums ${status === 'negative' ? 'font-semibold text-red-700' : ''}`}>
-                            {fmt(item.quantity)} <span className="text-slate-400">{item.unit}</span>
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-slate-600">
-                            {fmt(item.reorder_level)} <span className="text-slate-400">{item.unit}</span>
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-slate-600">
-                            {fmt(item.pack_size)} <span className="text-slate-400">{item.unit}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={status} />
-                          </td>
-                        </tr>
-                      )
-                    })}
-                {!loading && items.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                      No Key Items yet. Run <code className="font-mono">python seed.py</code> in the project root.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    ))}
+                  {keyItems.data?.map((item) => {
+                    const status = stockStatus(item)
+                    return (
+                      <tr key={item.id} className="transition hover:bg-slate-50">
+                        <td className="px-4 py-3 font-medium">
+                          <span className="inline-flex items-center gap-2">
+                            <Package className="size-4 text-slate-400" aria-hidden="true" />
+                            {item.name}
+                          </span>
+                        </td>
+                        <td className={`px-4 py-3 text-right tabular-nums ${status === 'negative' ? 'font-semibold text-red-700' : ''}`}>
+                          {fmt(item.quantity)} <span className="text-slate-400">{item.unit}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-slate-600">
+                          {fmt(item.reorder_level)} <span className="text-slate-400">{item.unit}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-slate-600">
+                          {fmt(item.pack_size)} <span className="text-slate-400">{item.unit}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={status} />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {keyItems.data?.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                        No Key Items yet. Run <code className="font-mono">python seed.py</code> in the project root.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </section>
     </>
   )
 }

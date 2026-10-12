@@ -1,0 +1,202 @@
+import { ClipboardCheck, Loader2, Send } from 'lucide-react'
+import { useState } from 'react'
+
+import api, { errorMessage } from '../api.js'
+import Banner from '../components/Banner.jsx'
+import { formatNumber as fmt, formatSigned } from '../format.js'
+import { useFetch } from '../useFetch.js'
+
+const AUDIT_TYPES = {
+  daily: { label: 'Daily (Key Items)', path: '/inventory/daily-items', hint: 'High-turnover Key Items only.' },
+  weekly: { label: 'Weekly (full count)', path: '/inventory/', hint: 'Every item in the store.' },
+  monthly: { label: 'End of Month (full count)', path: '/inventory/', hint: 'Every item, for the month-end stock-take.' },
+}
+
+/** "12,5" or "12.5" -> 12.5; '' -> null; anything invalid -> NaN. */
+function parseCount(text) {
+  const trimmed = text.trim().replace(',', '.')
+  if (trimmed === '') return null
+  return /^\d+(\.\d+)?$/.test(trimmed) ? Number(trimmed) : NaN
+}
+
+export default function Audits() {
+  const [auditType, setAuditType] = useState('daily')
+  const [counts, setCounts] = useState({}) // item_id -> text as typed
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [notice, setNotice] = useState(null)
+
+  const { data: items, error, loading, reload } = useFetch(AUDIT_TYPES[auditType].path)
+  const visible = loading ? [] : (items ?? [])
+
+  const parsed = visible.map((item) => ({ item, value: parseCount(counts[item.id] ?? '') }))
+  const entered = parsed.filter(({ value }) => value !== null)
+  const invalid = entered.filter(({ value }) => Number.isNaN(value))
+  const canSubmit = entered.length > 0 && invalid.length === 0 && !submitting
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!canSubmit) return
+    setSubmitting(true)
+    setNotice(null)
+    try {
+      const { data: audit } = await api.post('/inventory/audit', {
+        audit_type: auditType,
+        notes: notes.trim() || null,
+        counts: entered.map(({ item, value }) => ({ item_id: item.id, counted_quantity: value })),
+      })
+      const shrinkage = audit.lines.filter((line) => line.variance < 0).length
+      setNotice({
+        tone: 'success',
+        title: `${AUDIT_TYPES[auditType].label} audit #${audit.id} saved.`,
+        detail: `Stock for ${audit.lines.length} item${audit.lines.length === 1 ? '' : 's'} now matches the count${
+          shrinkage ? `; ${shrinkage} showed shrinkage` : ''
+        }.`,
+      })
+      setCounts({})
+      setNotes('')
+      reload()
+    } catch (err) {
+      setNotice({ tone: 'error', title: "Couldn't save the audit.", detail: errorMessage(err) })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      <header>
+        <p className="text-sm font-medium text-indigo-600">Inventory</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Stock Audits</h1>
+        <p className="mt-1 max-w-2xl text-sm text-slate-500">
+          Enter what is physically on the shelves. Submitting sets each counted item&apos;s stock to the count and logs the
+          variance.
+        </p>
+      </header>
+
+      {notice && (
+        <Banner tone={notice.tone} title={notice.title} onDismiss={() => setNotice(null)}>
+          {notice.detail}
+        </Banner>
+      )}
+
+      <form onSubmit={submit} className="mt-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <label className="block text-sm font-medium">
+            Audit type
+            <select
+              value={auditType}
+              onChange={(e) => setAuditType(e.target.value)}
+              className="mt-1 block w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            >
+              {Object.entries(AUDIT_TYPES).map(([value, { label }]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-sm text-slate-500">{AUDIT_TYPES[auditType].hint}</p>
+        </div>
+
+        {error && <Banner tone="error" title="Couldn't load the items to count.">{error}</Banner>}
+
+        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Item</th>
+                  <th scope="col" className="px-4 py-3 text-right">System stock</th>
+                  <th scope="col" className="px-4 py-3 text-right">Counted</th>
+                  <th scope="col" className="px-4 py-3 text-right">Variance</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading &&
+                  Array.from({ length: 6 }, (_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      {Array.from({ length: 4 }, (_, j) => (
+                        <td key={j} className="px-4 py-3.5">
+                          <div className="h-4 rounded bg-slate-100" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                {parsed.map(({ item, value }) => {
+                  const bad = Number.isNaN(value)
+                  const variance = value === null || bad ? null : value - item.quantity
+                  return (
+                    <tr key={item.id} className={value !== null && !bad ? 'bg-indigo-50/40' : ''}>
+                      <td className="px-4 py-2.5 font-medium">{item.name}</td>
+                      <td className={`px-4 py-2.5 text-right tabular-nums ${item.quantity < 0 ? 'text-red-700' : 'text-slate-600'}`}>
+                        {fmt(item.quantity)} <span className="text-slate-400">{item.unit}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={counts[item.id] ?? ''}
+                          onChange={(e) => setCounts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          aria-label={`Counted ${item.name} in ${item.unit}`}
+                          aria-invalid={bad}
+                          placeholder="—"
+                          className={`w-24 rounded-md border px-2 py-1 text-right tabular-nums focus:outline-none focus:ring-2 ${
+                            bad
+                              ? 'border-red-400 focus:ring-red-500/30'
+                              : 'border-slate-300 focus:border-indigo-500 focus:ring-indigo-500/30'
+                          }`}
+                        />
+                        <span className="ml-1.5 inline-block w-8 text-left text-slate-400">{item.unit}</span>
+                      </td>
+                      <td
+                        className={`px-4 py-2.5 text-right tabular-nums ${
+                          variance === null ? 'text-slate-300' : variance < 0 ? 'text-red-700' : variance > 0 ? 'text-emerald-700' : 'text-slate-500'
+                        }`}
+                      >
+                        {bad ? <span className="text-red-700">invalid</span> : variance === null ? '—' : `${formatSigned(variance)} ${item.unit}`}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {!loading && visible.length === 0 && !error && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-10 text-center text-slate-500">No items to count.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+          <label className="block text-sm font-medium">
+            Notes <span className="font-normal text-slate-400">(optional)</span>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              maxLength={500}
+              placeholder="e.g. Counted by the closing shift"
+              className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+          >
+            {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}
+            Submit Audit
+          </button>
+        </div>
+        <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-500">
+          <ClipboardCheck className="size-4" aria-hidden="true" />
+          {entered.length} of {visible.length} counted
+          {invalid.length > 0 && <span className="text-red-700"> · {invalid.length} invalid (use numbers ≥ 0)</span>}
+          {entered.length > 0 && entered.length < visible.length && ' · items left blank keep their current stock'}
+        </p>
+      </form>
+    </>
+  )
+}

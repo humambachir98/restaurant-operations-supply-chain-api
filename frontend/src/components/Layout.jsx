@@ -1,9 +1,11 @@
-import { ChefHat, ClipboardX, LayoutDashboard, Truck } from 'lucide-react'
+import { ArrowLeftRight, ChefHat, ClipboardCheck, ClipboardX, LayoutDashboard, Truck } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
   { to: '/orders', label: 'Restock Orders', Icon: Truck },
+  { to: '/audits', label: 'Audits', Icon: ClipboardCheck },
+  { to: '/stock-movements', label: 'Waste & Transfers', Icon: ArrowLeftRight },
   { to: '/complaints', label: 'Complaints', Icon: ClipboardX },
 ]
 
@@ -19,7 +21,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
           <NavLink to="/" className="inline-flex items-center gap-2 font-semibold tracking-tight">
             <span className="grid size-8 place-items-center rounded-lg bg-indigo-600 text-white">
               <ChefHat className="size-5" aria-hidden="true" />
@@ -28,16 +30,16 @@ export default function Layout() {
           </NavLink>
           <nav aria-label="Main" className="flex items-center gap-1">
             {NAV_ITEMS.map(({ to, label, Icon, end }) => (
-              <NavLink key={to} to={to} end={end} className={navLinkClass}>
+              <NavLink key={to} to={to} end={end} className={navLinkClass} title={label}>
                 <Icon className="size-4" aria-hidden="true" />
-                {label}
+                <span className="sr-only lg:not-sr-only">{label}</span>
               </NavLink>
             ))}
           </nav>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
         <Outlet />
       </main>
     </div>

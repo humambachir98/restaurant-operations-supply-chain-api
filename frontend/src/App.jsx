@@ -1,9 +1,11 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 
 import Layout from './components/Layout.jsx'
+import Audits from './pages/Audits.jsx'
 import Complaints from './pages/Complaints.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import RestockOrders from './pages/RestockOrders.jsx'
+import StockMovements from './pages/StockMovements.jsx'
 
 function NotFound() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<RestockOrders />} />
+          <Route path="audits" element={<Audits />} />
+          <Route path="stock-movements" element={<StockMovements />} />
           <Route path="complaints" element={<Complaints />} />
           <Route path="*" element={<NotFound />} />
         </Route>
