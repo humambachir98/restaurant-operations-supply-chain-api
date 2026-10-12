@@ -1,11 +1,12 @@
-import { ArrowLeftRight, ChefHat, ClipboardCheck, ClipboardX, LayoutDashboard, Truck } from 'lucide-react'
+import { ArrowLeftRight, ChefHat, ClipboardCheck, ClipboardX, LayoutDashboard, Trash2, Truck } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
   { to: '/orders', label: 'Restock Orders', Icon: Truck },
   { to: '/audits', label: 'Audits', Icon: ClipboardCheck },
-  { to: '/stock-movements', label: 'Waste & Transfers', Icon: ArrowLeftRight },
+  { to: '/waste', label: 'Waste', Icon: Trash2 },
+  { to: '/transfers', label: 'Transfers', Icon: ArrowLeftRight },
   { to: '/complaints', label: 'Complaints', Icon: ClipboardX },
 ]
 

@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-120%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-131%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -170,10 +170,13 @@ stock would hide these errors instead of showing them.
 | Item list | `GET /inventory/daily-items` | `GET /inventory/` |
 
   Items left out of an audit keep their current stock.
-- **Waste and store transfers.** `POST /waste/` records thrown-away stock (with a reason and the
-  daily/weekly/monthly period it's booked against) and deducts it. `POST /transfers/` records
-  stock sent to (`out`) or received from (`in`) another store. Each entry and its stock change
-  are saved in one transaction, so there's never a log without the stock change or vice versa.
+- **Batch waste and transfers, built for the end-of-day rush.** `POST /waste/` books a whole
+  list of wasted items at once (`{"items": [{item_id, quantity, reason?}]}`) and deducts each.
+  `POST /transfers/` records a transfer list with one other store
+  (`{"target_store_name", "items": [{item_id, quantity, direction}]}`): `out` lines deduct
+  stock, `in` lines add it. **Each batch is all or nothing:** it's validated up front (known
+  items, no duplicates, positive quantities) and saved in a single transaction, so a bad line
+  or a failure halfway through leaves stock exactly as it was.
 
 - **Validation that matches reality:** a *count* can't be negative, but a *stock balance* can.
   Each item may appear only once per audit or order. An audit with an unknown item changes
@@ -266,7 +269,7 @@ app/
 ├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 120 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+tests/                 # 131 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -283,8 +286,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redo
 | Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
 | Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
 | Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly\|monthly`) |
-| Waste | `GET/POST /waste/` (`?on=YYYY-MM-DD` Berlin day, `?audit_type=`, `?limit=`) |
-| Transfers | `GET/POST /transfers/` (`?direction=in\|out`, `?limit=`) |
+| Waste | `POST /waste/` (batch) · `GET /waste/` (`?on=YYYY-MM-DD` Berlin day, `?limit=`) |
+| Transfers | `POST /transfers/` (batch, one store) · `GET /transfers/` (`?direction=in\|out`, `?limit=`) |
 | Dashboard | `GET /dashboard/summary` |
 | Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/trigger-auto-receive` · `POST /purchase-orders/{id}/receive` |
 | Complaints | `GET/POST /complaints/` (`?status=pending\|approved\|rejected`) · `GET /complaints/{id}` · `POST /complaints/{id}/approve` · `POST /complaints/{id}/reject` |
@@ -372,7 +375,8 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | **Dashboard** (`/`) | Stock health, today's waste, recent transfers, open deliveries and complaints; the 18 Key Items |
 | **Restock Orders** (`/orders`) | Manual order builder for any item, plus a low-stock alerts panel whose "Add to Order" puts the suggested packs into the draft; upcoming deliveries |
 | **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter physical quantities, see the variance live, submit to set stock |
-| **Waste & Transfers** (`/stock-movements`) | Log waste and store transfers; today's waste and recent transfers |
+| **Waste** (`/waste`) | End-of-day booking: every item in one searchable list, enter only what was wasted, submit once |
+| **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
@@ -405,14 +409,14 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **120 tests**, each running against a fresh in-memory database. They include:
+There are **131 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
 - shift duration limits **across both DST changes**, and every kind of overlap (partial, contained, identical, back-to-back, reassignment)
 - automated receiving: due today vs. later, catch-up after downtime, idempotency, one failing order not blocking others, the 06:00 job across the DST change
 - complaints: approve/reject apply stock once, validation against the delivered quantity
-- waste and transfers: stock changes, atomic rollback, validation, Berlin-day filtering (incl. 25-hour DST days)
+- batch waste and transfers: every line applied, all-or-nothing on invalid lines and mid-batch failures, Berlin-day filtering (incl. 25-hour DST days)
 - dashboard summary figures; monthly audits; migration downgrade keeping monthly audits as weekly
 - daily vs. weekly audit rules and variance logging
 - migrations: model/migration drift, full downgrade, and the data backfill for existing rows

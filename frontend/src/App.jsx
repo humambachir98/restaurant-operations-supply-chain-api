@@ -5,7 +5,8 @@ import Audits from './pages/Audits.jsx'
 import Complaints from './pages/Complaints.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import RestockOrders from './pages/RestockOrders.jsx'
-import StockMovements from './pages/StockMovements.jsx'
+import Transfers from './pages/Transfers.jsx'
+import Waste from './pages/Waste.jsx'
 
 function NotFound() {
   return (
@@ -27,7 +28,8 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<RestockOrders />} />
           <Route path="audits" element={<Audits />} />
-          <Route path="stock-movements" element={<StockMovements />} />
+          <Route path="waste" element={<Waste />} />
+          <Route path="transfers" element={<Transfers />} />
           <Route path="complaints" element={<Complaints />} />
           <Route path="*" element={<NotFound />} />
         </Route>

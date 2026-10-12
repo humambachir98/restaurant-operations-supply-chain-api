@@ -107,7 +107,7 @@ function StockHealthCard({ health }) {
 
 function WasteCard({ waste }) {
   return (
-    <Card title="Today's waste" Icon={Trash2} iconClass="text-red-600" link={{ to: '/stock-movements', label: 'Log waste' }}>
+    <Card title="Today's waste" Icon={Trash2} iconClass="text-red-600" link={{ to: '/waste', label: 'Book waste' }}>
       {!waste ? (
         <Skeleton />
       ) : (
@@ -137,7 +137,7 @@ function WasteCard({ waste }) {
 
 function TransfersCard({ transfers }) {
   return (
-    <Card title="Recent transfers" Icon={ArrowUpRight} iconClass="text-indigo-600" link={{ to: '/stock-movements', label: 'Record' }}>
+    <Card title="Recent transfers" Icon={ArrowUpRight} iconClass="text-indigo-600" link={{ to: '/transfers', label: 'New transfer' }}>
       {!transfers ? (
         <Skeleton />
       ) : transfers.length === 0 ? (
