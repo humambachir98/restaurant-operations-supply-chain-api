@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import StoreTransfer, TransferDirection
 from app.routers.inventory import get_items_or_400
-from app.schemas import StoreTransferCreate, StoreTransferRead
+from app.schemas import StoreTransferRead, TransferBatchCreate
 from app.services.stock import adjust_stock
+from app.utils.time import now_local
 
 router = APIRouter(prefix="/transfers", tags=["transfers"])
 
@@ -24,17 +25,26 @@ def list_transfers(
     return db.scalars(query).all()
 
 
-@router.post("/", response_model=StoreTransferRead, status_code=status.HTTP_201_CREATED)
-def record_transfer(payload: StoreTransferCreate, db: Session = Depends(get_db)):
-    """Record stock moved to ('out') or from ('in') another store, updating stock in the same transaction."""
-    get_items_or_400(db, [payload.item_id])
-    transfer = StoreTransfer(**payload.model_dump())
+@router.post("/", response_model=list[StoreTransferRead], status_code=status.HTTP_201_CREATED)
+def record_transfers(payload: TransferBatchCreate, db: Session = Depends(get_db)):
+    """Record a transfer list with one other store: 'out' lines deduct stock, 'in' lines add it.
+
+    All or nothing: one transaction, so an invalid line or a failure leaves stock untouched.
+    """
+    get_items_or_400(db, (line.item_id for line in payload.items))
+    recorded_at = now_local()
+    transfers = [
+        StoreTransfer(**line.model_dump(), target_store_name=payload.target_store_name, created_at=recorded_at)
+        for line in payload.items
+    ]
     try:
-        db.add(transfer)
-        adjust_stock(db, payload.item_id, transfer.stock_change)
+        db.add_all(transfers)
+        for transfer in transfers:
+            adjust_stock(db, transfer.item_id, transfer.stock_change)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    db.refresh(transfer)
-    return transfer
+    for transfer in transfers:
+        db.refresh(transfer)
+    return transfers

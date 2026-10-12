@@ -1,20 +1,39 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from app.models import AuditType, TransferDirection
+from app.models import TransferDirection
+from app.schemas.common import ensure_unique_item_ids
 
 # Trimmed before the length check, so whitespace-only text is rejected.
-Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 StoreName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
+MAX_BATCH = 500
 
-class WasteLogCreate(BaseModel):
+
+class WasteLineCreate(BaseModel):
     item_id: int
     quantity: float = Field(gt=0, description="Amount thrown away, in the item's stock unit")
-    audit_type: AuditType = AuditType.daily
-    reason: Reason = Field(examples=["Fries held past 7 minutes"])
+    reason: str | None = Field(default=None, max_length=500, examples=["Fries held past 7 minutes"])
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def blank_reason_is_none(cls, value):
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+
+class WasteBatchCreate(BaseModel):
+    """An end-of-day waste booking: one line per item that had waste."""
+
+    items: list[WasteLineCreate] = Field(min_length=1, max_length=MAX_BATCH)
+
+    @model_validator(mode="after")
+    def check_unique_items(self):
+        ensure_unique_item_ids(self.items)
+        return self
 
 
 class WasteLogRead(BaseModel):
@@ -25,16 +44,26 @@ class WasteLogRead(BaseModel):
     item_name: str
     unit: str
     quantity: float
-    audit_type: AuditType
-    reason: str
+    reason: str | None
     created_at: datetime
 
 
-class StoreTransferCreate(BaseModel):
+class TransferLineCreate(BaseModel):
     item_id: int
     quantity: float = Field(gt=0, description="Amount moved, in the item's stock unit")
     direction: TransferDirection = Field(description="'in' adds to stock, 'out' deducts from it")
+
+
+class TransferBatchCreate(BaseModel):
+    """A transfer list with one other store: each line goes in or out."""
+
     target_store_name: StoreName = Field(examples=["Berlin Alexanderplatz"])
+    items: list[TransferLineCreate] = Field(min_length=1, max_length=MAX_BATCH)
+
+    @model_validator(mode="after")
+    def check_unique_items(self):
+        ensure_unique_item_ids(self.items)
+        return self
 
 
 class StoreTransferRead(BaseModel):

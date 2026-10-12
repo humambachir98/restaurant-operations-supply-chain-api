@@ -13,7 +13,14 @@ from app.schemas.purchase_order import (
 )
 from app.schemas.dashboard import DashboardSummary, StockHealth, WasteItemTotal, WasteToday
 from app.schemas.shift import ShiftCreate, ShiftRead, ShiftUpdate
-from app.schemas.stock_movement import StoreTransferCreate, StoreTransferRead, WasteLogCreate, WasteLogRead
+from app.schemas.stock_movement import (
+    StoreTransferRead,
+    TransferBatchCreate,
+    TransferLineCreate,
+    WasteBatchCreate,
+    WasteLineCreate,
+    WasteLogRead,
+)
 
 __all__ = [
     "AuditCount", "InventoryAuditCreate", "InventoryAuditLineRead", "InventoryAuditRead",
@@ -24,5 +31,6 @@ __all__ = [
     "PurchaseOrderSuggestion", "SuggestedOrderItem", "AutoReceiveResult",
     "DashboardSummary", "StockHealth", "WasteItemTotal", "WasteToday",
     "ShiftCreate", "ShiftRead", "ShiftUpdate",
-    "StoreTransferCreate", "StoreTransferRead", "WasteLogCreate", "WasteLogRead",
+    "StoreTransferRead", "TransferBatchCreate", "TransferLineCreate",
+    "WasteBatchCreate", "WasteLineCreate", "WasteLogRead",
 ]

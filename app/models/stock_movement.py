@@ -7,7 +7,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.database.types import LocalDateTime
-from app.models.audit import AuditType
 from app.utils.time import now_local
 
 if TYPE_CHECKING:
@@ -29,15 +28,14 @@ class _ItemDetails:
 
 
 class WasteLog(_ItemDetails, Base):
-    """Stock thrown away (expired, dropped, burnt). Logging it deducts the quantity from stock."""
+    """Stock thrown away (expired, dropped, burnt). Booking it deducts the quantity from stock."""
 
     __tablename__ = "waste_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("inventory_items.id"), index=True)
     quantity: Mapped[float]  # in the item's stock unit, always positive
-    audit_type: Mapped[AuditType]  # the reporting period the waste is booked against
-    reason: Mapped[str] = mapped_column(String(500))
+    reason: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(LocalDateTime, default=now_local, index=True)
 
     item: Mapped["InventoryItem"] = relationship(lazy="joined")

@@ -83,3 +83,30 @@ def test_monthly_audits_survive_downgrade_as_weekly(tmp_path):
         assert types == ["weekly", "daily"]
         assert "waste_logs" not in inspect(engine).get_table_names()
     engine.dispose()
+
+
+def test_waste_without_reason_survives_downgrade(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'waste.db').as_posix()}"
+    config = alembic_config(url)
+    command.upgrade(config, "head")
+
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO inventory_items (id, name, unit, quantity, reorder_level, is_daily_tracked, pack_size) "
+            "VALUES (1, 'Fries', 'kg', 0, 0, 1, 15)"
+        ))
+        conn.execute(text(
+            "INSERT INTO waste_logs (item_id, quantity, reason, created_at) VALUES "
+            "(1, 2.5, NULL, '2026-10-12 20:00:00'), (1, 1, 'Dropped', '2026-10-12 21:00:00')"
+        ))
+
+    command.downgrade(config, "1df1f3dbdfe5")  # waste still had audit_type and a required reason
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT audit_type, reason FROM waste_logs ORDER BY id")).all()
+        assert [tuple(r) for r in rows] == [("daily", "Not specified"), ("daily", "Dropped")]
+
+    command.upgrade(config, "head")  # and back up again
+    with engine.connect() as conn:
+        assert "audit_type" not in {c["name"] for c in inspect(conn).get_columns("waste_logs")}
+    engine.dispose()
