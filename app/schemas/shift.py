@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from app.models import EmployeeRole
 from app.schemas.common import ZonedDateTime
 from app.utils.time import elapsed
 
@@ -24,6 +25,8 @@ class ShiftBase(BaseModel):
     employee_id: int
     start_time: ZonedDateTime
     end_time: ZonedDateTime
+    # Left out: the employee's own role.
+    role_worked: EmployeeRole | None = None
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -40,6 +43,7 @@ class ShiftUpdate(BaseModel):
     employee_id: int | None = None
     start_time: ZonedDateTime | None = None
     end_time: ZonedDateTime | None = None
+    role_worked: EmployeeRole | None = None
     notes: str | None = None
 
 
@@ -47,3 +51,4 @@ class ShiftRead(ShiftBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    role_worked: EmployeeRole

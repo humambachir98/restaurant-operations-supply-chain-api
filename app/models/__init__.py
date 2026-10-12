@@ -5,6 +5,7 @@ from app.models.inventory import InventoryItem
 from app.models.menu import MenuItem, RecipeIngredient
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.models.shift import Shift
+from app.models.time_off import TimeOff, TimeOffStatus
 from app.models.stock_movement import StoreTransfer, TransferDirection, WasteLog
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "MenuItem", "RecipeIngredient",
     "PurchaseOrder", "PurchaseOrderItem", "PurchaseOrderStatus",
     "Shift",
+    "TimeOff", "TimeOffStatus",
     "StoreTransfer", "TransferDirection", "WasteLog",
 ]

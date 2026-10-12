@@ -14,6 +14,7 @@ from app.schemas.purchase_order import (
     SuggestedOrderItem,
 )
 from app.schemas.dashboard import DashboardSummary, StockHealth, WasteItemTotal, WasteToday
+from app.schemas.schedule import ScheduleDay, ScheduleRow, WeeklySchedule
 from app.schemas.shift import ShiftCreate, ShiftRead, ShiftUpdate
 from app.schemas.stock_movement import (
     StoreTransferRead,
@@ -23,6 +24,7 @@ from app.schemas.stock_movement import (
     WasteLineCreate,
     WasteLogRead,
 )
+from app.schemas.time_off import TimeOffCreate, TimeOffRead, TimeOffUpdate
 
 __all__ = [
     "AuditBatchRead", "TransferBatchRead", "WasteBatchRead",
@@ -34,7 +36,9 @@ __all__ = [
     "PurchaseOrderCreate", "PurchaseOrderItemCreate", "PurchaseOrderItemRead", "PurchaseOrderRead",
     "PurchaseOrderSuggestion", "SuggestedOrderItem", "AutoReceiveResult",
     "DashboardSummary", "StockHealth", "WasteItemTotal", "WasteToday",
+    "ScheduleDay", "ScheduleRow", "WeeklySchedule",
     "ShiftCreate", "ShiftRead", "ShiftUpdate",
     "StoreTransferRead", "TransferBatchCreate", "TransferLineCreate",
     "WasteBatchCreate", "WasteLineCreate", "WasteLogRead",
+    "TimeOffCreate", "TimeOffRead", "TimeOffUpdate",
 ]

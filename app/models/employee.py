@@ -8,11 +8,12 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.shift import Shift
+    from app.models.time_off import TimeOff
 
 
 class EmployeeRole(enum.StrEnum):
-    shift_manager = "shift_manager"
-    crew = "crew"
+    shift_manager = "shift_manager"  # Schichtführer
+    crew = "crew"  # Mitarbeiter
 
 
 class Employee(Base):
@@ -25,5 +26,8 @@ class Employee(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
 
     shifts: Mapped[list["Shift"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan"
+    )
+    time_off: Mapped[list["TimeOff"]] = relationship(
         back_populates="employee", cascade="all, delete-orphan"
     )

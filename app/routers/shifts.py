@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import Employee, Shift
 from app.schemas import ShiftCreate, ShiftRead, ShiftUpdate
 from app.schemas.shift import check_shift_window
+from app.services.roster import ensure_not_off, shift_day
 
 router = APIRouter(prefix="/shifts", tags=["shifts"])
 
@@ -19,9 +20,11 @@ def _get_or_404(db: Session, shift_id: int) -> Shift:
     return shift
 
 
-def _ensure_employee(db: Session, employee_id: int) -> None:
-    if db.get(Employee, employee_id) is None:
+def _get_employee_or_400(db: Session, employee_id: int) -> Employee:
+    employee = db.get(Employee, employee_id)
+    if employee is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Employee does not exist")
+    return employee
 
 
 def _ensure_no_overlap(
@@ -55,9 +58,15 @@ def list_shifts(employee_id: int | None = None, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ShiftRead, status_code=status.HTTP_201_CREATED)
 def create_shift(payload: ShiftCreate, db: Session = Depends(get_db)):
-    _ensure_employee(db, payload.employee_id)
+    """Schedule a shift. `role_worked` defaults to the employee's role.
+
+    Rejected if it lasts over 10 hours, overlaps another of the employee's shifts, or falls on a
+    day the employee is marked off.
+    """
+    employee = _get_employee_or_400(db, payload.employee_id)
     _ensure_no_overlap(db, payload.employee_id, payload.start_time, payload.end_time)
-    shift = Shift(**payload.model_dump())
+    ensure_not_off(db, payload.employee_id, shift_day(payload.start_time))
+    shift = Shift(**payload.model_dump(exclude={"role_worked"}), role_worked=payload.role_worked or employee.role)
     db.add(shift)
     db.commit()
     db.refresh(shift)
@@ -73,8 +82,9 @@ def get_shift(shift_id: int, db: Session = Depends(get_db)):
 def update_shift(shift_id: int, payload: ShiftUpdate, db: Session = Depends(get_db)):
     shift = _get_or_404(db, shift_id)
     data = payload.model_dump(exclude_unset=True)
-    if "employee_id" in data:
-        _ensure_employee(db, data["employee_id"])
+    employee = _get_employee_or_400(db, data["employee_id"]) if "employee_id" in data else shift.employee
+    if "role_worked" in data and data["role_worked"] is None:
+        data["role_worked"] = employee.role  # null resets it to the employee's role
     employee_id = data.get("employee_id", shift.employee_id)
     start = data.get("start_time", shift.start_time)
     end = data.get("end_time", shift.end_time)
@@ -83,6 +93,8 @@ def update_shift(shift_id: int, payload: ShiftUpdate, db: Session = Depends(get_
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     _ensure_no_overlap(db, employee_id, start, end, exclude_shift_id=shift.id)
+    if employee_id != shift.employee_id or shift_day(start) != shift_day(shift.start_time):
+        ensure_not_off(db, employee_id, shift_day(start))
     for field, value in data.items():
         setattr(shift, field, value)
     db.commit()

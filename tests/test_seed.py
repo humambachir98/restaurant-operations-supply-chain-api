@@ -17,11 +17,11 @@ def test_seed_inserts_expected_data_and_is_idempotent():
     with Session(engine) as db:
         first = seed.seed(db)
         db.commit()
-        assert (first.employees_added, first.items_added) == (3, 28)
+        assert (first.employees_added, first.items_added) == (6, 28)
         assert (first.menu_items_added, first.packaging_set) == (len(seed.MENU_ITEMS), 0)  # new items aren't counted
 
         roles = sorted(db.scalars(select(Employee.role)))
-        assert roles == [EmployeeRole.crew, EmployeeRole.crew, EmployeeRole.shift_manager]
+        assert roles == [EmployeeRole.crew] * 4 + [EmployeeRole.shift_manager] * 2  # 4 Mitarbeiter, 2 Schichtführer
         fries_pack = db.scalar(select(InventoryItem.pack_size).where(InventoryItem.name == "French Fries"))
         assert fries_pack == 15
         assert _count(db, InventoryItem.pack_size <= 0) == 0
@@ -37,7 +37,7 @@ def test_seed_inserts_expected_data_and_is_idempotent():
         db.commit()
         assert second == seed.SeedResult(0, 0)
         assert db.scalar(select(func.count()).select_from(MenuItem)) == len(seed.MENU_ITEMS)
-        assert db.scalar(select(func.count()).select_from(Employee)) == 3
+        assert db.scalar(select(func.count()).select_from(Employee)) == 6
         assert _count(db) == 28
         db.refresh(fries)
         assert fries.quantity == -3

@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-167%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-181%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -25,6 +25,7 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
   - [2. German labor law compliance (Arbeitszeitgesetz)](#2-german-labor-law-compliance-arbeitszeitgesetz)
   - [3. Realistic inventory management](#3-realistic-inventory-management)
   - [4. Automated receiving & complaints (Reklamation)](#4-automated-receiving--complaints-reklamation)
+  - [5. Shift management (Schichtplan)](#5-shift-management-schichtplan)
 - [Engineering quality](#engineering-quality)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
@@ -48,6 +49,7 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
 | Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly and end-of-month full audits** | Fast checks on the important items, full accuracy each week and month |
 | Stock leaves without a sale: waste, or lending to a nearby branch | **Waste log** and **store transfers** that update stock as they're recorded | Every movement is explained, so the count variance shrinks |
 | A dropped Whopper is a patty and a bun, not a line in the menu | **Bill of materials**: wasted burgers are broken down into their ingredients, each logged with a note like "(From wasted Whopper)" | Waste lands on the stock that was actually lost |
+| Rosters miss the minimum crew, or plan someone who is on holiday | **Weekly Schichtplan** with Urlaub / Krank / Frei, a red ⚠️ on every day below 1 Schichtführer + 2 Mitarbeiter | Gaps are visible before the week starts |
 | An area manager needs the picture at a glance | **Dashboard summary**: stock health, today's waste, recent transfers, open deliveries and complaints | One screen instead of five |
 
 ---
@@ -142,7 +144,7 @@ offset is read as Berlin time; input with one (e.g. `Z`) is converted. A single 
 `TypeDecorator` handles all of this.
 
 **Roles** are an enum (`shift_manager`, `crew`), so invalid values are rejected at the API
-boundary.
+boundary. The UI shows them as **Schichtführer** and **Mitarbeiter**.
 
 > **Scope:** the 10-hour limit applies per shift. Limits per day or week across several shifts,
 > and break rules (§ 4 ArbZG), are not yet modelled.
@@ -219,6 +221,28 @@ complaints leave stock alone.
 | Difference must not be 0; a note is required | `422` |
 | A complaint can be approved or rejected only once (concurrency-safe) | `400` |
 
+### 5. Shift management (Schichtplan)
+
+**Problem:** a week's roster has to respect holidays and sick days, and every day needs enough
+people: at least one Schichtführer and two Mitarbeiter on a full 8-hour shift.
+
+**Solution:** shifts keep their Berlin-aware start and end (so the ArbZG and DST rules above still
+apply, night shifts included) and gain a `role_worked`: by default the employee's role, but a
+Schichtführer can cover a Mitarbeiter slot. **Time-off** (`Urlaub`, `Krank`, `Frei`) is one status
+per employee and day.
+
+| Rule | Response |
+| --- | --- |
+| A shift on a day the employee is marked off, or time-off on a day they have a shift | `400` |
+| A second time-off status for the same employee and day | `400` |
+| A night shift (22:00 → 06:00) | belongs to the day it starts |
+
+`GET /schedule/weekly?start_date=` returns the week (Monday to Sunday, any day of it may be passed)
+as a matrix: one row per employee (Schichtführer first, then by name), one cell per day with its
+shifts and time-off. The frontend checks each day's **coverage**: different people with a shift of
+at least 8 real hours, counted by `role_worked`. A day below 1 Schichtführer + 2 Mitarbeiter gets a
+red ⚠️ in its column header.
+
 ---
 
 ## Engineering quality
@@ -266,14 +290,15 @@ app/
 ├── config.py          # Settings from .env (time zone, order cut-off, auto-receive time, DB URL)
 ├── scheduler.py       # APScheduler: daily auto-receive job, startup catch-up
 ├── database/          # Engine & session, UTC-storing/Berlin-returning DateTime type, migration helper
-├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder,
-│                      #   Complaint, WasteLog, StoreTransfer, MenuItem, RecipeIngredient
+├── models/            # SQLAlchemy models: Employee, Shift, TimeOff, InventoryItem, InventoryAudit,
+│                      #   PurchaseOrder, Complaint, WasteLog, StoreTransfer, MenuItem, RecipeIngredient
 ├── schemas/           # Pydantic request/response models and validation rules
 ├── routers/           # HTTP endpoints per resource
-├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
+├── services/          # Receiving (scheduler, trigger, receive endpoint), the shared atomic stock adjustment,
+│                      #   roster availability rules (no shift on a day off)
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 167 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+tests/                 # 181 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with pack sizes and packaging, 7 burger recipes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -288,6 +313,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redo
 | --- | --- |
 | Employees | `GET/POST /employees/` · `GET/PATCH/DELETE /employees/{id}` |
 | Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
+| Time-off | `GET/POST /time-off/` (`?employee_id=&start_date=&end_date=`) · `GET/PATCH/DELETE /time-off/{id}` |
+| Schedule | `GET /schedule/weekly?start_date=YYYY-MM-DD` (Monday-to-Sunday roster matrix) |
 | Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
 | Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly\|monthly`) |
 | Menu items | `GET/POST /menu-items/` (recipes / bill of materials) |
@@ -356,7 +383,7 @@ alembic downgrade -1                                       # roll back one step
 python seed.py
 ```
 
-This adds 3 employees (1 shift manager, 2 crew), 18 daily-tracked Key Items and 10 other items,
+This adds 6 employees (2 shift managers, 4 crew), 18 daily-tracked Key Items and 10 other items,
 each with a realistic supplier pack size (e.g. fries in 15 kg boxes, patties 48 per box) and,
 for piece goods, its packaging (e.g. 48 patties per carton in bags of 12). It also adds 7 menu
 items with their recipes (e.g. Whopper = 1 Whopper patty + 1 sesame bun) for burger waste. It
@@ -376,7 +403,8 @@ Then open **http://127.0.0.1:8000/docs** and try `POST /purchase-orders/auto-sug
 
 ## Frontend
 
-A React + Vite web app in `frontend/`. It talks to the API above.
+A React + Vite web app in `frontend/`. It talks to the API above. A persistent left sidebar groups
+the pages into **🍔 Operations & Inventory** and **👥 Shift Management** (a drawer on small screens).
 
 | Page | What it does |
 | --- | --- |
@@ -386,6 +414,7 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | **Waste** (`/waste`) | End-of-day booking: wasted burgers (broken down into ingredients) and raw items, enter only what was wasted (a negative number corrects a mistake and returns stock), submit once |
 | **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
+| **Schichtplan** (`/schedule`) | Weekly roster: rows per employee (Schichtführer, then Mitarbeiter), a column per day. Click a cell to assign a shift (start / end, night shifts allowed) or mark Urlaub 🌴, Krank 🤒 or Frei; a red ⚠️ marks days below minimum coverage. The week is kept in the URL (`?week=`) |
 
 Item names in tables show their packaging, e.g. `Whopper Patties (48/12)` (pieces per carton / pieces per bag). Audits, Waste and
 Transfers each have an **Active View / Monthly Archive** switch (past submissions per month, expandable and
@@ -424,7 +453,7 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **167 tests**, each running against a fresh in-memory database. They include:
+There are **181 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
@@ -437,4 +466,5 @@ There are **167 tests**, each running against a fresh in-memory database. They i
 - dashboard summary figures; monthly audits; migration downgrade keeping monthly audits as weekly
 - daily vs. weekly audit rules, full-count enforcement (missing items rejected) and variance logging
 - migrations: model/migration drift, full downgrade, and the data backfills for existing rows (incl. batch ids per past submission)
+- roster: time-off CRUD, no shift on a day off (and vice versa), role worked, the weekly matrix (Monday snapping, ordering, night and DST shifts), the role-worked backfill migration
 - seed script idempotency

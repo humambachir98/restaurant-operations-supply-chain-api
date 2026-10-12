@@ -5,6 +5,7 @@ import Audits from './pages/Audits.jsx'
 import Complaints from './pages/Complaints.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import RestockOrders from './pages/RestockOrders.jsx'
+import Schedule from './pages/Schedule.jsx'
 import Transfers from './pages/Transfers.jsx'
 import Waste from './pages/Waste.jsx'
 
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="waste" element={<Waste />} />
           <Route path="transfers" element={<Transfers />} />
           <Route path="complaints" element={<Complaints />} />
+          <Route path="schedule" element={<Schedule />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

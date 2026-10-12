@@ -13,7 +13,9 @@ from app.routers import (
     inventory,
     menu_items,
     purchase_orders,
+    schedule,
     shifts,
+    time_off,
     transfers,
     waste,
 )
@@ -47,6 +49,8 @@ app.add_middleware(
 
 app.include_router(employees.router)
 app.include_router(shifts.router)
+app.include_router(time_off.router)
+app.include_router(schedule.router)
 app.include_router(inventory.router)
 app.include_router(menu_items.router)
 app.include_router(purchase_orders.router)

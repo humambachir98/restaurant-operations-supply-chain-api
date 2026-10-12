@@ -26,6 +26,9 @@ EMPLOYEES = [
     {"name": "Sabine Krüger", "role": EmployeeRole.shift_manager, "email": "sabine.krueger@example.com"},
     {"name": "Jonas Weber", "role": EmployeeRole.crew, "email": "jonas.weber@example.com"},
     {"name": "Aylin Demir", "role": EmployeeRole.crew, "email": "aylin.demir@example.com"},
+    {"name": "Markus Hoffmann", "role": EmployeeRole.shift_manager, "email": "markus.hoffmann@example.com"},
+    {"name": "Lena Schmidt", "role": EmployeeRole.crew, "email": "lena.schmidt@example.com"},
+    {"name": "Mehmet Yilmaz", "role": EmployeeRole.crew, "email": "mehmet.yilmaz@example.com"},
 ]
 
 # (name, unit, starting quantity, reorder level, pack size = units per supplier pack)
