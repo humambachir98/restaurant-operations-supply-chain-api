@@ -22,16 +22,15 @@ export const formatSigned = (value) => (value > 0 ? '+' : value < 0 ? '−' : ''
 /** Today's date in Berlin as YYYY-MM-DD (the API's notion of "today"). */
 export const todayInBerlin = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date())
 
-/** "Carton: 48 | Sub: 12" from an item's packaging, or '' when it has none. */
+/**
+ * Clipboard shorthand for an item's packaging: "<pieces per carton>/<pieces per bag>", e.g. "48/12".
+ * Both values are stored in pieces, so no maths is needed. '' when the item has no piece packaging.
+ */
 export function packagingLabel(item) {
-  const parts = []
-  if (item?.units_per_carton) parts.push(`Carton: ${item.units_per_carton}`)
-  if (item?.units_per_subpackage) parts.push(`Sub: ${item.units_per_subpackage}`)
-  return parts.join(' | ')
-}
-
-/** "Whopper Patties (Carton: 48 | Sub: 12)", or just the name when there is no packaging. */
-export function itemLabel(item) {
-  const packaging = packagingLabel(item)
-  return packaging ? `${item.name} (${packaging})` : item.name
+  const perCarton = item?.units_per_carton
+  const perBag = item?.units_per_subpackage
+  if (perCarton && perBag) return `${perCarton}/${perBag}`
+  if (perCarton) return `${perCarton}`
+  if (perBag) return `/${perBag}`
+  return ''
 }

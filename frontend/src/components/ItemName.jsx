@@ -1,6 +1,6 @@
 import { packagingLabel } from '../format.js'
 
-/** An item's name followed by its packaging, e.g. "Whopper Patties (Carton: 48 | Sub: 12)". */
+/** An item's name followed by its packaging, e.g. "Whopper Patties (48/12)". */
 export default function ItemName({ item, name = item?.name }) {
   const packaging = packagingLabel(item)
   return (

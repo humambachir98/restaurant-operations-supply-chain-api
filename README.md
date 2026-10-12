@@ -385,11 +385,11 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
-Item names in tables show their packaging, e.g. `Whopper Patties (Carton: 48 | Sub: 12)`. Audits, Waste and
+Item names in tables show their packaging, e.g. `Whopper Patties (48/12)` (pieces per carton / pieces per bag). Audits, Waste and
 Transfers each have an **Active View / Monthly Archive** switch (past submissions per month, expandable and
 read-only) and a **Download PDF Checklist** button. The sheets are **blind counts**: they never show the system
-quantity, so staff can't copy the expected figure. Each row has a **Packaging Info** column with the maths for
-counting, e.g. `1 Carton = 4 Bags | 1 Bag = 12 Pcs` (loose goods: `1 Carton = 15 kg`). Audit and transfer sheets
+quantity, so staff can't copy the expected figure. Each row has a **Packaging Info** column in the same
+shorthand, e.g. `48/12` (loose goods: the supplier pack, e.g. `15 kg`). Audit and transfer sheets
 have blank Cartons / Bags/Subs / Pieces columns, the waste sheet blank Waste Amount and Reason columns.
 
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
