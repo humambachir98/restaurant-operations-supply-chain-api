@@ -124,7 +124,9 @@ function WasteCard({ waste }) {
               {waste.items.slice(0, 4).map((w) => (
                 <li key={w.item_id} className="flex items-center justify-between gap-2">
                   <span className="truncate text-slate-600">{w.item_name}</span>
-                  <span className="shrink-0 tabular-nums text-red-700">−{fmt(w.quantity)} {w.unit}</span>
+                  <span className={`shrink-0 tabular-nums ${w.quantity < 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {formatSigned(-w.quantity)} {w.unit}
+                  </span>
                 </li>
               ))}
               {waste.items.length > 4 && <li className="text-xs text-slate-400">+{waste.items.length - 4} more items</li>}

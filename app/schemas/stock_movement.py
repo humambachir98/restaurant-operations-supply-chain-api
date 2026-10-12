@@ -18,7 +18,10 @@ class WasteLineCreate(BaseModel):
     item_id: int | None = None
     menu_item_id: int | None = None
     quantity: float = Field(
-        gt=0, description="Amount thrown away: in the item's stock unit, or the number of menu items"
+        description=(
+            "Amount thrown away: in the item's stock unit, or the number of menu items. "
+            "Negative to correct an earlier booking: it returns the amount to stock."
+        )
     )
     reason: str | None = Field(default=None, max_length=500, examples=["Fries held past 7 minutes"])
 
@@ -27,6 +30,13 @@ class WasteLineCreate(BaseModel):
     def blank_reason_is_none(cls, value):
         if isinstance(value, str):
             return value.strip() or None
+        return value
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_not_zero(cls, value: float) -> float:
+        if value == 0:
+            raise ValueError("Quantity must not be 0")
         return value
 
     @model_validator(mode="after")

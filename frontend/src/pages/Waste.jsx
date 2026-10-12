@@ -8,28 +8,32 @@ import Banner from '../components/Banner.jsx'
 import ItemName from '../components/ItemName.jsx'
 import PdfButton from '../components/PdfButton.jsx'
 import Segmented from '../components/Segmented.jsx'
-import { formatDateTime, formatNumber as fmt, todayInBerlin } from '../format.js'
+import { formatDateTime, formatNumber as fmt, formatSigned, todayInBerlin } from '../format.js'
 import { WASTE_COLUMNS, WASTE_HEAD, downloadChecklist, wasteRows } from '../pdf.js'
 import { useFetch } from '../useFetch.js'
 
-/** "2,5" or "2.5" -> 2.5; '' or 0 -> null (no waste); anything invalid -> NaN. */
+/** "2,5" or "2.5" -> 2.5; "-2" -> -2 (a correction); '' or 0 -> null (no waste); anything invalid -> NaN. */
 function parseWaste(text) {
-  const trimmed = (text ?? '').trim().replace(',', '.')
+  const trimmed = (text ?? '').trim().replace(',', '.').replace('−', '-')
   if (trimmed === '') return null
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return NaN
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return NaN
   return Number(trimmed) === 0 ? null : Number(trimmed)
 }
 
-/** Whole menu items only: "3" -> 3; '' or 0 -> null; anything else -> NaN. */
+/** Whole menu items only: "3" -> 3; "-2" -> -2 (a correction); '' or 0 -> null; anything else -> NaN. */
 function parseCount(text) {
-  const trimmed = (text ?? '').trim()
+  const trimmed = (text ?? '').trim().replace('−', '-')
   if (trimmed === '') return null
-  if (!/^\d+$/.test(trimmed)) return NaN
+  if (!/^-?\d+$/.test(trimmed)) return NaN
   return Number(trimmed) === 0 ? null : Number(trimmed)
 }
 
 const recipeText = (menuItem, times = 1) =>
   menuItem.ingredients.map((i) => `${fmt(i.quantity_needed * times)} ${i.unit === 'pcs' ? '×' : i.unit} ${i.item_name}`).join(' + ')
+
+// Waste deducts stock (red); a negative correction returns it (green).
+const rowClass = (value) => (value === null || Number.isNaN(value) ? '' : value < 0 ? 'bg-emerald-50/60' : 'bg-red-50/60')
+const wasteClass = (quantity) => (quantity < 0 ? 'text-emerald-700' : 'text-red-700')
 
 const inputClass = (bad) =>
   `w-20 rounded-md border px-2 py-1 text-right tabular-nums focus:outline-none focus:ring-2 ${
@@ -106,13 +110,15 @@ export default function Waste() {
           })),
         ],
       })
-      const burgers = menuLines.reduce((sum, { value }) => sum + value, 0)
+      const burgers = menuLines.reduce((sum, { value }) => sum + Math.abs(value), 0)
+      const corrected = [...lines, ...menuLines].some(({ value }) => value < 0)
+      const stockText = corrected ? 'stock has been updated, corrections returned to stock' : 'stock has been reduced accordingly'
       setNotice({
         tone: 'success',
         title: `Waste booked: ${data.length} stock entr${data.length === 1 ? 'y' : 'ies'}.`,
         detail: burgers
-          ? `${burgers} menu item${burgers === 1 ? ' was' : 's were'} broken down into ingredients; stock has been reduced accordingly.`
-          : 'Stock has been reduced accordingly.',
+          ? `${burgers} menu item${burgers === 1 ? ' was' : 's were'} broken down into ingredients; ${stockText}.`
+          : `${stockText[0].toUpperCase()}${stockText.slice(1)}.`,
       })
       setEntries({})
       setMenuEntries({})
@@ -175,8 +181,8 @@ export default function Waste() {
                   <td className="px-4 py-2 font-medium">
                     <ItemName item={itemsById[w.item_id]} name={w.item_name} />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-red-700">
-                    −{fmt(w.quantity)} {w.unit}
+                  <td className={`whitespace-nowrap px-4 py-2 text-right tabular-nums ${wasteClass(w.quantity)}`}>
+                    {formatSigned(-w.quantity)} {w.unit}
                   </td>
                   <td className="px-4 py-2 text-slate-500">{w.reason ?? '—'}</td>
                 </tr>
@@ -207,7 +213,7 @@ export default function Waste() {
                       <th scope="col" className="px-4 py-3">Menu item</th>
                       <th scope="col" className="px-4 py-3 text-right">Wasted</th>
                       <th scope="col" className="px-4 py-3">Reason <span className="font-normal normal-case">(optional)</span></th>
-                      <th scope="col" className="px-4 py-3">Deducts from stock</th>
+                      <th scope="col" className="px-4 py-3">Stock effect</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -223,7 +229,7 @@ export default function Waste() {
                       const bad = Number.isNaN(value)
                       const active = value !== null && !bad
                       return (
-                        <tr key={menuItem.id} className={active ? 'bg-red-50/60' : ''}>
+                        <tr key={menuItem.id} className={rowClass(value)}>
                           <td className="px-4 py-2 font-medium">{menuItem.name}</td>
                           <td className="whitespace-nowrap px-4 py-2 text-right">
                             <input
@@ -249,8 +255,12 @@ export default function Waste() {
                               className={reasonClass}
                             />
                           </td>
-                          <td className={`px-4 py-2 ${active ? 'text-red-700' : 'text-slate-400'}`}>
-                            {bad ? 'whole numbers only' : recipeText(menuItem, active ? value : 1)}
+                          <td className={`px-4 py-2 ${active ? wasteClass(value) : 'text-slate-400'}`}>
+                            {bad
+                              ? 'whole numbers only'
+                              : active && value < 0
+                                ? `Returns ${recipeText(menuItem, -value)}`
+                                : recipeText(menuItem, active ? value : 1)}
                           </td>
                         </tr>
                       )
@@ -297,7 +307,7 @@ export default function Waste() {
                       const bad = Number.isNaN(value)
                       const active = value !== null && !bad
                       return (
-                        <tr key={item.id} className={active ? 'bg-red-50/60' : ''}>
+                        <tr key={item.id} className={rowClass(value)}>
                           <td className="px-4 py-2 font-medium">
                             <ItemName item={item} />
                             {item.is_daily_tracked && (
@@ -357,6 +367,9 @@ export default function Waste() {
           </section>
 
           <div className="sticky bottom-0 z-10 -mx-4 mt-4 border-t border-slate-200 bg-slate-50/95 px-4 py-4 backdrop-blur sm:-mx-6 sm:px-6">
+            <p className="mb-3 text-sm text-slate-500">
+              💡 Tip: Enter a negative number to correct a previous mistake and return items to stock.
+            </p>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-slate-600">
                 <span className="font-semibold text-slate-900">{valid}</span> line{valid === 1 ? '' : 's'} with waste
@@ -401,7 +414,7 @@ export default function Waste() {
                     {w.reason && <p className="truncate text-slate-500">{w.reason}</p>}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="tabular-nums text-red-700">−{fmt(w.quantity)} {w.unit}</p>
+                    <p className={`tabular-nums ${wasteClass(w.quantity)}`}>{formatSigned(-w.quantity)} {w.unit}</p>
                     <p className="text-xs text-slate-400">{formatDateTime(w.created_at)}</p>
                   </div>
                 </li>

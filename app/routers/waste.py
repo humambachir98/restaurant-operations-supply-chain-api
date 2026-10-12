@@ -33,8 +33,11 @@ def list_waste(
 
 
 def _deconstructed_reason(line: WasteLineCreate, menu_item_name: str) -> str:
-    """The line's reason with an auto-note naming the menu item, e.g. "Dropped (From wasted Whopper)"."""
-    note = f"(From wasted {menu_item_name})"
+    """The line's reason with an auto-note naming the menu item, e.g. "Dropped (From wasted Whopper)".
+
+    Corrections (negative quantities) are noted as "(Correction: returned Whopper)".
+    """
+    note = f"(From wasted {menu_item_name})" if line.quantity > 0 else f"(Correction: returned {menu_item_name})"
     if line.reason is None:
         return note
     return f"{line.reason[: REASON_MAX_LENGTH - len(note) - 1]} {note}"
@@ -47,6 +50,10 @@ def book_waste(payload: WasteBatchCreate, db: Session = Depends(get_db)):
     Each line is either a raw inventory item (`item_id`) or a finished menu item
     (`menu_item_id`). A menu item is broken down by its recipe: every ingredient is logged as
     its own waste entry (quantity_needed x quantity) with a note naming the menu item.
+
+    A negative quantity corrects an earlier mistake: it is logged as a negative entry and adds the
+    amount back to stock. For a menu item every ingredient is returned (e.g. -2 Whoppers returns
+    2 patties and 2 buns).
 
     All or nothing: one transaction, so an invalid line or a failure leaves stock untouched.
     """

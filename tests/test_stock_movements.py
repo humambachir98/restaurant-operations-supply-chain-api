@@ -93,13 +93,34 @@ def test_waste_can_take_stock_negative(client):
     assert _stock(client, buns) == -3  # the next count corrects it
 
 
+def test_negative_waste_corrects_a_mistake_and_returns_stock(client):
+    buns = _item(client, quantity=100)
+    fries = _item(client, "French Fries", quantity=20, unit="kg")
+    assert _book_waste(client, (buns, 10), (fries, 2.5)).status_code == 201
+    assert (_stock(client, buns), _stock(client, fries)) == (90, 17.5)
+
+    # 4 of the 10 buns were booked by mistake, and all of the fries.
+    resp = _book_waste(client, (buns, -4, "Booked twice"), (fries, -2.5))
+    assert resp.status_code == 201, resp.text
+    assert sorted((e["item_name"], e["quantity"], e["reason"]) for e in resp.json()) == [
+        ("French Fries", -2.5, None), ("Sesame Buns", -4, "Booked twice"),
+    ]
+    assert (_stock(client, buns), _stock(client, fries)) == (94, 20)
+
+
+def test_negative_and_positive_waste_in_one_booking(client):
+    buns = _item(client, quantity=100)
+    fries = _item(client, "French Fries", quantity=20, unit="kg")
+    assert _book_waste(client, (buns, -3), (fries, 1.5)).status_code == 201
+    assert (_stock(client, buns), _stock(client, fries)) == (103, 18.5)
+
+
 @pytest.mark.parametrize(
     "lines",
     [
         [],  # empty booking
         [{"quantity": 1}],  # no item
         "zero",
-        "negative",
         "duplicate",
         "unknown item",
         "reason too long",
@@ -111,7 +132,6 @@ def test_invalid_waste_batch_changes_nothing(client, lines):
     good = {"item_id": fries["id"], "quantity": 1}
     bad = {
         "zero": {"item_id": buns["id"], "quantity": 0},
-        "negative": {"item_id": buns["id"], "quantity": -1},
         "duplicate": {"item_id": fries["id"], "quantity": 2},
         "unknown item": {"item_id": 999, "quantity": 1},
         "reason too long": {"item_id": buns["id"], "quantity": 1, "reason": "x" * 501},

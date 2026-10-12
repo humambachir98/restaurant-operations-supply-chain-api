@@ -119,6 +119,37 @@ def test_wasted_menu_items_deduct_their_ingredients(client, burgers):
     ]
 
 
+def test_negative_menu_waste_returns_every_ingredient(client, burgers):
+    b = burgers
+    client.post("/waste/", json={"items": [{"menu_item_id": b["cheeseburger"]["id"], "quantity": 3}]})
+    assert [_stock(client, b[k]) for k in ("hamburger_patty", "regular", "cheese")] == [57, 37, 197]
+
+    # Two of the three were booked by mistake; -2 Whoppers is a correction from an earlier day.
+    resp = client.post("/waste/", json={"items": [
+        {"menu_item_id": b["cheeseburger"]["id"], "quantity": -2, "reason": "Typo"},
+        {"menu_item_id": b["whopper"]["id"], "quantity": -2},
+    ]})
+    assert resp.status_code == 201, resp.text
+    assert sorted((e["item_name"], e["quantity"], e["reason"]) for e in resp.json()) == [
+        ("Cheese Slices", -2, "Typo (Correction: returned Cheeseburger)"),
+        ("Hamburger Patties", -2, "Typo (Correction: returned Cheeseburger)"),
+        ("Regular Buns", -2, "Typo (Correction: returned Cheeseburger)"),
+        ("Sesame Buns", -2, "(Correction: returned Whopper)"),
+        ("Whopper Patties", -2, "(Correction: returned Whopper)"),
+    ]
+    assert [_stock(client, b[k]) for k in ("hamburger_patty", "regular", "cheese", "patty", "sesame")] == [
+        59, 39, 199, 52, 42,
+    ]
+
+
+def test_negative_menu_waste_scales_fractional_recipe(client):
+    lettuce = _item(client, "Lettuce", 5, unit="kg")
+    salad = _menu_item(client, "Garden Salad", (lettuce, 0.15))
+    entry = client.post("/waste/", json={"items": [{"menu_item_id": salad["id"], "quantity": -4}]}).json()[0]
+    assert entry["quantity"] == pytest.approx(-0.6)
+    assert _stock(client, lettuce) == pytest.approx(5.6)
+
+
 def test_menu_item_quantity_scales_recipe(client):
     lettuce = _item(client, "Lettuce", 5, unit="kg")
     salad = _menu_item(client, "Garden Salad", (lettuce, 0.15))

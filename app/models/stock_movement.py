@@ -28,13 +28,16 @@ class _ItemDetails:
 
 
 class WasteLog(_ItemDetails, Base):
-    """Stock thrown away (expired, dropped, burnt). Booking it deducts the quantity from stock."""
+    """Stock thrown away (expired, dropped, burnt). Booking it deducts the quantity from stock.
+
+    A negative quantity corrects an earlier booking and returns the amount to stock.
+    """
 
     __tablename__ = "waste_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("inventory_items.id"), index=True)
-    quantity: Mapped[float]  # in the item's stock unit, always positive
+    quantity: Mapped[float]  # in the item's stock unit; negative for a correction
     reason: Mapped[str | None] = mapped_column(String(500))
     batch_id: Mapped[str] = mapped_column(String(36), index=True)  # shared by one booking
     created_at: Mapped[datetime] = mapped_column(LocalDateTime, default=now_local, index=True)

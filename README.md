@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-164%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-167%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -174,10 +174,12 @@ stock would hide these errors instead of showing them.
   nothing is applied. A row can't be skipped as "checked": enter `0` if none is left.
 - **Batch waste and transfers, built for the end-of-day rush.** `POST /waste/` books a whole
   list of wasted items at once (`{"items": [{item_id, quantity, reason?}]}`) and deducts each.
+  A **negative quantity corrects an earlier mistake** and returns the amount to stock; for a
+  menu item every ingredient is returned (e.g. −2 Whoppers puts back 2 patties and 2 buns).
   `POST /transfers/` records a transfer list with one other store
   (`{"target_store_name", "items": [{item_id, quantity, direction}]}`): `out` lines deduct
   stock, `in` lines add it. **Each batch is all or nothing:** it's validated up front (known
-  items, no duplicates, positive quantities) and saved in a single transaction, so a bad line
+  items, no duplicates, quantities that aren't 0, and positive for transfers) and saved in a single transaction, so a bad line
   or a failure halfway through leaves stock exactly as it was.
 
 - **Validation that matches reality:** a *count* can't be negative, but a *stock balance* can.
@@ -271,7 +273,7 @@ app/
 ├── services/          # Receiving (scheduler, trigger, receive endpoint) and the shared atomic stock adjustment
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 164 tests: API, business rules, DST edge cases, scheduling, migrations, seed
+tests/                 # 167 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with pack sizes and packaging, 7 burger recipes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -381,7 +383,7 @@ A React + Vite web app in `frontend/`. It talks to the API above.
 | **Dashboard** (`/`) | Stock health, today's waste, recent transfers, open deliveries and complaints; the 18 Key Items |
 | **Restock Orders** (`/orders`) | Manual order builder for any item, plus a low-stock alerts panel whose "Add to Order" puts the suggested packs into the draft; upcoming deliveries |
 | **Audits** (`/audits`) | Daily / weekly / end-of-month counts: enter a physical quantity for every listed item (Submit stays locked while any row is blank), see the variance live, submit the whole count as one batch |
-| **Waste** (`/waste`) | End-of-day booking: wasted burgers (broken down into ingredients) and raw items, enter only what was wasted, submit once |
+| **Waste** (`/waste`) | End-of-day booking: wasted burgers (broken down into ingredients) and raw items, enter only what was wasted (a negative number corrects a mistake and returns stock), submit once |
 | **Transfers** (`/transfers`) | Transfer builder: add items from a searchable picker, set direction and quantity per line, one store for the list |
 | **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
 
@@ -422,7 +424,7 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **164 tests**, each running against a fresh in-memory database. They include:
+There are **167 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
