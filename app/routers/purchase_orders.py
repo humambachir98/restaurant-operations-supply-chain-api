@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import InventoryItem, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.routers.inventory import IS_LOW_STOCK, get_items_or_400
 from app.schemas import (
+    AutoReceiveResult,
     PurchaseOrderCreate,
     PurchaseOrderRead,
     PurchaseOrderSuggestion,
     SuggestedOrderItem,
 )
+from app.services.receiving import auto_receive_due_orders, mark_received
 from app.utils.delivery import get_next_delivery_date
 from app.utils.restock import packs_to_order, suggested_order_quantity
 from app.utils.time import now_local
@@ -102,6 +104,16 @@ def auto_suggest_order(db: Session = Depends(get_db)):
     )
 
 
+@router.post("/trigger-auto-receive", response_model=AutoReceiveResult)
+def trigger_auto_receive(db: Session = Depends(get_db)):
+    """Run the daily 06:00 auto-receive now: every pending order due today or earlier is received.
+
+    Safe to call any number of times; already received orders are never counted twice.
+    """
+    as_of = now_local().date()
+    return AutoReceiveResult(as_of=as_of, received_order_ids=auto_receive_due_orders(db, as_of))
+
+
 @router.get("/{order_id}", response_model=PurchaseOrderRead)
 def get_order(order_id: int, db: Session = Depends(get_db)):
     return _get_or_404(db, order_id)
@@ -109,26 +121,11 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{order_id}/receive", response_model=PurchaseOrderRead)
 def receive_order(order_id: int, db: Session = Depends(get_db)):
-    """Mark the delivery as received and add every ordered quantity to stock, atomically."""
+    """Receive one order now (e.g. an early delivery), without waiting for the 06:00 auto-receive."""
     order = _get_or_404(db, order_id)
     try:
-        # Conditional UPDATE: of two concurrent requests, only one can flip pending -> received,
-        # so the stock is never added twice.
-        flipped = db.execute(
-            update(PurchaseOrder)
-            .where(PurchaseOrder.id == order_id, PurchaseOrder.status == PurchaseOrderStatus.pending)
-            .values(status=PurchaseOrderStatus.received, received_at=now_local())
-        ).rowcount
-        if flipped == 0:
+        if not mark_received(db, order):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Purchase order has already been received")
-
-        for line in order.items:
-            # Increment in SQL rather than read-modify-write, so concurrent stock changes aren't lost.
-            db.execute(
-                update(InventoryItem)
-                .where(InventoryItem.id == line.item_id)
-                .values(quantity=InventoryItem.quantity + line.quantity)  # packs * pack_size
-            )
         db.commit()
     except Exception:
         db.rollback()

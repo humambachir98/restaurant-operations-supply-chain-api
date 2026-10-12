@@ -1,6 +1,7 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 
 import Layout from './components/Layout.jsx'
+import Complaints from './pages/Complaints.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import RestockOrders from './pages/RestockOrders.jsx'
 
@@ -23,6 +24,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<RestockOrders />} />
+          <Route path="complaints" element={<Complaints />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

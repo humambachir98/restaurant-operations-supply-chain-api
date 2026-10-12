@@ -8,3 +8,13 @@ const dateFormat = new Intl.DateTimeFormat('en-GB', {
 })
 
 export const formatDate = (isoDate) => dateFormat.format(new Date(isoDate))
+
+// Full timestamps from the API carry an offset; show them on the restaurant's clock.
+const dateTimeFormat = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin',
+})
+
+export const formatDateTime = (isoDateTime) => dateTimeFormat.format(new Date(isoDateTime))
+
+/** "+6" / "−30": explicit sign for stock changes. */
+export const formatSigned = (value) => (value > 0 ? '+' : value < 0 ? '−' : '') + numberFormat.format(Math.abs(value))

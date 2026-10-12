@@ -137,5 +137,5 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Item is referenced by audits or purchase orders and can't be deleted",
+            "Item is referenced by audits, purchase orders or complaints and can't be deleted",
         )

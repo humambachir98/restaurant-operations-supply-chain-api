@@ -1,9 +1,10 @@
-import { ChefHat, LayoutDashboard, Truck } from 'lucide-react'
+import { ChefHat, ClipboardX, LayoutDashboard, Truck } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
   { to: '/orders', label: 'Restock Orders', Icon: Truck },
+  { to: '/complaints', label: 'Complaints', Icon: ClipboardX },
 ]
 
 function navLinkClass({ isActive }) {

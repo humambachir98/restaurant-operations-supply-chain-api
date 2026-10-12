@@ -210,7 +210,8 @@ def test_order_snapshots_pack_size(client):
     fries = _item(client, "Fries", pack_size=15)
     order = _order(client, [{"item_id": fries["id"], "packs": 3}]).json()
     assert order["items"][0] | {"id": None} == {
-        "id": None, "item_id": fries["id"], "packs": 3, "pack_size": 15, "quantity": 45,
+        "id": None, "item_id": fries["id"], "item_name": "Fries", "unit": "pcs",
+        "packs": 3, "pack_size": 15, "quantity": 45,
     }
 
     # Changing the item's pack size later doesn't change what this order delivers.

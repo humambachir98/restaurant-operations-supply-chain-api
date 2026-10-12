@@ -26,6 +26,8 @@ class PurchaseOrderItemRead(BaseModel):
 
     id: int
     item_id: int
+    item_name: str
+    unit: str
     packs: int
     pack_size: float  # as of when the order was placed
     quantity: float  # packs * pack_size, in stock units; added to stock on receipt
@@ -62,3 +64,8 @@ class PurchaseOrderSuggestion(BaseModel):
     generated_at: datetime
     expected_delivery_date: date  # if submitted now
     items: list[SuggestedOrderItem]
+
+
+class AutoReceiveResult(BaseModel):
+    as_of: date  # orders due on or before this date were received
+    received_order_ids: list[int]

@@ -1,27 +1,9 @@
-import { CalendarClock, CheckCircle2, Loader2, PackageCheck, Send, Sparkles, X, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { CalendarClock, Loader2, PackageCheck, Send, Sparkles, Truck } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import api, { errorMessage } from '../api.js'
+import Banner from '../components/Banner.jsx'
 import { formatDate, formatNumber as fmt } from '../format.js'
-
-function Banner({ tone, Icon, title, children, onDismiss }) {
-  const tones = {
-    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    error: 'border-red-200 bg-red-50 text-red-800',
-  }
-  return (
-    <div role={tone === 'error' ? 'alert' : 'status'} className={`mt-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${tones[tone]}`}>
-      <Icon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-      <div className="flex-1">
-        <p className="font-medium">{title}</p>
-        {children && <p className="mt-1">{children}</p>}
-      </div>
-      <button type="button" onClick={onDismiss} className="rounded p-0.5 opacity-70 hover:opacity-100" aria-label="Dismiss">
-        <X className="size-4" />
-      </button>
-    </div>
-  )
-}
 
 export default function RestockOrders() {
   const [draft, setDraft] = useState(null) // response of POST /purchase-orders/auto-suggest
@@ -29,6 +11,23 @@ export default function RestockOrders() {
   const [busy, setBusy] = useState(null) // 'generating' | 'submitting' | null
   const [error, setError] = useState(null)
   const [placedOrder, setPlacedOrder] = useState(null)
+  const [pendingOrders, setPendingOrders] = useState(null) // null while loading
+  const [pendingError, setPendingError] = useState(null)
+  const [pendingKey, setPendingKey] = useState(0) // bump to reload pending orders
+
+  useEffect(() => {
+    const controller = new AbortController()
+    api
+      .get('/purchase-orders/', { params: { status: 'pending' }, signal: controller.signal })
+      .then(({ data }) => {
+        setPendingOrders(data)
+        setPendingError(null)
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) setPendingError(errorMessage(err))
+      })
+    return () => controller.abort()
+  }, [pendingKey])
 
   const packsFor = (itemId) => Number(packs[itemId] || 0)
   const orderLines = (draft?.items ?? [])
@@ -59,6 +58,7 @@ export default function RestockOrders() {
       setPlacedOrder({ ...order, totalPacks })
       setDraft(null)
       setPacks({})
+      setPendingKey((key) => key + 1)
     } catch (err) {
       setError({ title: "Couldn't place the order.", detail: errorMessage(err) })
     } finally {
@@ -100,14 +100,14 @@ export default function RestockOrders() {
       </div>
 
       {placedOrder && (
-        <Banner tone="success" Icon={CheckCircle2} title={`Order #${placedOrder.id} placed.`} onDismiss={() => setPlacedOrder(null)}>
+        <Banner tone="success" title={`Order #${placedOrder.id} placed.`} onDismiss={() => setPlacedOrder(null)}>
           {placedOrder.items.length} item{placedOrder.items.length === 1 ? '' : 's'}, {placedOrder.totalPacks} pack
-          {placedOrder.totalPacks === 1 ? '' : 's'}. Expected delivery: {formatDate(placedOrder.expected_delivery_date)}.
+          {placedOrder.totalPacks === 1 ? '' : 's'}. Scheduled for automatic delivery on {formatDate(placedOrder.expected_delivery_date)}.
         </Banner>
       )}
 
       {error && (
-        <Banner tone="error" Icon={XCircle} title={error.title} onDismiss={() => setError(null)}>
+        <Banner tone="error" title={error.title} onDismiss={() => setError(null)}>
           {error.detail}
         </Banner>
       )}
@@ -221,6 +221,60 @@ export default function RestockOrders() {
           </div>
         </section>
       )}
+
+      <section className="mt-10" aria-labelledby="pending-heading">
+        <h2 id="pending-heading" className="font-semibold">
+          Upcoming deliveries
+          {pendingOrders?.length > 0 && <span className="font-normal text-slate-500"> · {pendingOrders.length}</span>}
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Deliveries are received automatically at 06:00 on their delivery day and added to stock. Report missing or
+          damaged goods on the Complaints page.
+        </p>
+
+        {pendingError && <Banner tone="error" title="Couldn't load upcoming deliveries." className="mt-3">{pendingError}</Banner>}
+
+        {!pendingError && pendingOrders === null && (
+          <div className="mt-3 h-20 animate-pulse rounded-xl border border-slate-200 bg-white" />
+        )}
+
+        {pendingOrders?.length === 0 && (
+          <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500">
+            No deliveries scheduled.
+          </p>
+        )}
+
+        {pendingOrders?.length > 0 && (
+          <ul className="mt-3 space-y-3">
+            {pendingOrders.map((order) => (
+              <li key={order.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">
+                    Order #{order.id}{' '}
+                    <span className="font-normal text-slate-500">
+                      · {order.items.length} item{order.items.length === 1 ? '' : 's'}
+                    </span>
+                  </p>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 ring-1 ring-inset ring-sky-600/20">
+                    <Truck className="size-3.5" aria-hidden="true" />
+                    Scheduled for automatic delivery on {formatDate(order.expected_delivery_date)}
+                  </span>
+                </div>
+                <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                  {order.items.map((line) => (
+                    <li key={line.id}>
+                      {line.item_name}{' '}
+                      <span className="tabular-nums text-slate-400">
+                        {line.packs} × {fmt(line.pack_size)} {line.unit}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </>
   )
 }

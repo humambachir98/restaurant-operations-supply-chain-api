@@ -1,5 +1,6 @@
 import enum
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -8,6 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from app.database.types import LocalDateTime
 from app.utils.time import now_local
+
+if TYPE_CHECKING:
+    from app.models.inventory import InventoryItem
 
 
 class PurchaseOrderStatus(enum.StrEnum):
@@ -46,6 +50,15 @@ class PurchaseOrderItem(Base):
     pack_size: Mapped[float]
 
     order: Mapped[PurchaseOrder] = relationship(back_populates="items")
+    item: Mapped["InventoryItem"] = relationship(lazy="joined")
+
+    @property
+    def item_name(self) -> str:
+        return self.item.name
+
+    @property
+    def unit(self) -> str:
+        return self.item.unit
 
     @hybrid_property
     def quantity(self) -> float:

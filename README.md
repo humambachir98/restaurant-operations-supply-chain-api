@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-6BA539)
-![Pytest](https://img.shields.io/badge/tests-83%20passing-0A9EDC?logo=pytest&logoColor=white)
+![Pytest](https://img.shields.io/badge/tests-100%20passing-0A9EDC?logo=pytest&logoColor=white)
 
 A backend for running a fast-food restaurant: staff scheduling, stock control and supplier
 ordering. It is built around the rules a real restaurant in Germany has to follow, including
@@ -24,6 +24,7 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
   - [1. Smart restock & supply chain](#1-smart-restock--supply-chain)
   - [2. German labor law compliance (Arbeitszeitgesetz)](#2-german-labor-law-compliance-arbeitszeitgesetz)
   - [3. Realistic inventory management](#3-realistic-inventory-management)
+  - [4. Automated receiving & complaints (Reklamation)](#4-automated-receiving--complaints-reklamation)
 - [Engineering quality](#engineering-quality)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
@@ -42,6 +43,8 @@ fixed supplier delivery days, whole-box ordering, the **Arbeitszeitgesetz** and 
 | Suppliers only deliver on certain days, with a cut-off | Every order gets its **expected delivery date** (Tue / Thu / Sat, 14:00 cut-off the day before) | Staff know when goods will arrive |
 | Scheduling mistakes break labor law | **Shifts over 10 hours and double-booked staff are rejected** | Compliance is enforced on every create and update |
 | Stock records don't match the shelves | **Negative stock is allowed**, and physical counts correct it while logging the variance | The system reflects reality, and shrinkage shows up |
+| Nobody should have to book in every delivery by hand | **Deliveries are received automatically at 06:00** on their delivery day, with catch-up after downtime | Stock is right before the morning shift starts |
+| Deliveries arrive short, damaged or with extras | **Complaints (Reklamation)** per order line, applied to stock only when a manager approves | Corrections leave an audit trail instead of silent edits |
 | Counting everything every day isn't practical | **Daily Key-Item audits** plus **weekly full audits**, as separate workflows | Fast checks on the important items, full accuracy each week |
 
 ---
@@ -92,11 +95,8 @@ Details that make it work in practice:
 - **Delivery days.** Orders arrive Tuesday, Thursday or Saturday, and must be placed before
   14:00 Berlin time the day before. Monday 13:59 arrives Tuesday; Monday 14:00 arrives
   Thursday.
-- **Receiving a delivery is atomic and can only happen once.** A conditional
-  `UPDATE … WHERE status = 'pending'` lets exactly one of two simultaneous requests mark the
-  order received. Stock is incremented in SQL (`quantity = quantity + n`), not read and
-  rewritten, so concurrent stock changes aren't lost. If any line fails, the whole
-  delivery is rolled back.
+- **Deliveries are received automatically.** See
+  [Automated receiving](#4-automated-receiving--complaints-reklamation).
 
 ### 2. German labor law compliance (Arbeitszeitgesetz)
 
@@ -170,6 +170,39 @@ stock would hide these errors instead of showing them.
   Each item may appear only once per audit or order. An audit with an unknown item changes
   nothing.
 
+### 4. Automated receiving & complaints (Reklamation)
+
+**Problem:** deliveries arrive early in the morning, before anyone has time to book them in.
+And sometimes a pallet arrives with crushed buns, a box is missing, or the supplier sends extra.
+
+**Automated receiving.** An APScheduler job runs every day at **06:00 Berlin time** (DST-aware,
+configurable via `AUTO_RECEIVE_TIME`). It receives every pending order due **today or earlier**
+and adds its packs × pack size to stock.
+
+- **No missed deliveries.** "Today or earlier" means orders aren't stuck if the server was down
+  on their delivery day. On startup, the app also catches up on anything already due (but
+  doesn't receive today's orders before 06:00).
+- **Can't add stock twice.** Each order is flipped with a conditional
+  `UPDATE … WHERE status = 'pending'`, so the scheduler, a manual trigger and the receive
+  endpoint can't all receive the same order. This also holds with several app processes running.
+- **One transaction per order.** Stock is incremented in SQL (`quantity = quantity + n`), not
+  read and rewritten. If one order fails, it's rolled back and logged, and the others are still
+  received.
+- `POST /purchase-orders/trigger-auto-receive` runs the same logic immediately (for testing or
+  after an outage). `POST /purchase-orders/{id}/receive` books in a single early delivery.
+
+**Complaints.** A manager files a complaint against a line of a **received** order with a
+`quantity_difference` in the item's unit: negative for missing or damaged goods, positive for
+extras, plus a note. Stock changes only when the complaint is **approved**; **rejected**
+complaints leave stock alone.
+
+| Rule | Response |
+| --- | --- |
+| Order must be received, and the item must be on it | `400` |
+| Can't report more missing than was delivered | `400` |
+| Difference must not be 0; a note is required | `422` |
+| A complaint can be approved or rejected only once (concurrency-safe) | `400` |
+
 ---
 
 ## Engineering quality
@@ -203,6 +236,7 @@ stock would hide these errors instead of showing them.
 | Database | **SQLite** (configurable via `DATABASE_URL`) |
 | Time zones | `zoneinfo` + `tzdata` (Europe/Berlin) |
 | Testing | **Pytest** + FastAPI `TestClient`, in-memory SQLite |
+| Scheduling | **APScheduler** (cron job in the FastAPI lifespan) |
 | Server | **Uvicorn** |
 | Frontend | **React 19** + **Vite**, **Tailwind CSS v4**, Axios, React Router, lucide-react |
 
@@ -212,15 +246,17 @@ stock would hide these errors instead of showing them.
 
 ```text
 app/
-├── main.py            # FastAPI app, router registration, migrations on startup
-├── config.py          # Settings from .env (time zone, order cut-off, DB URL)
+├── main.py            # FastAPI app, routers, CORS; lifespan runs migrations and the scheduler
+├── config.py          # Settings from .env (time zone, order cut-off, auto-receive time, DB URL)
+├── scheduler.py       # APScheduler: daily auto-receive job, startup catch-up
 ├── database/          # Engine & session, UTC-storing/Berlin-returning DateTime type, migration helper
-├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder
+├── models/            # SQLAlchemy models: Employee, Shift, InventoryItem, InventoryAudit, PurchaseOrder, Complaint
 ├── schemas/           # Pydantic request/response models and validation rules
 ├── routers/           # HTTP endpoints per resource
+├── services/          # Receiving logic shared by the scheduler, the trigger and the receive endpoint
 └── utils/             # Pure domain logic: restock & pack maths, delivery days, Berlin clock
 alembic/versions/      # Migration history
-tests/                 # 83 tests: API, business rules, DST edge cases, migrations, seed
+tests/                 # 100 tests: API, business rules, DST edge cases, scheduling, migrations, seed
 seed.py                # Realistic sample data (staff, 28 items with real pack sizes)
 frontend/              # React + Vite dashboard (see Frontend below)
 ```
@@ -237,7 +273,8 @@ Interactive documentation: **http://127.0.0.1:8000/docs** (Swagger UI) or `/redo
 | Shifts | `GET/POST /shifts/` (`?employee_id=`) · `GET/PATCH/DELETE /shifts/{id}` |
 | Inventory | `GET/POST /inventory/` (`?low_stock=true`) · `GET/PATCH/DELETE /inventory/{id}` · `GET /inventory/low-stock` · `GET /inventory/daily-items` |
 | Audits | `POST /inventory/audit` · `GET /inventory/audits` (`?audit_type=daily\|weekly`) |
-| Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/{id}/receive` |
+| Purchase orders | `GET/POST /purchase-orders/` (`?status=pending\|received`) · `GET /purchase-orders/{id}` · `POST /purchase-orders/auto-suggest` · `POST /purchase-orders/trigger-auto-receive` · `POST /purchase-orders/{id}/receive` |
+| Complaints | `GET/POST /complaints/` (`?status=pending\|approved\|rejected`) · `GET /complaints/{id}` · `POST /complaints/{id}/approve` · `POST /complaints/{id}/reject` |
 | Health | `GET /health` |
 
 ---
@@ -273,6 +310,8 @@ cp .env.example .env        # Windows: copy .env.example .env
 | `TIMEZONE` | `Europe/Berlin` | Business time zone |
 | `ORDER_CUTOFF` | `14:00` | Latest order time on the day before a delivery |
 | `MIGRATE_ON_STARTUP` | `true` | Apply pending migrations when the app starts |
+| `AUTO_RECEIVE_ENABLED` | `true` | Run the daily auto-receive job (and the startup catch-up) |
+| `AUTO_RECEIVE_TIME` | `06:00` | Berlin time at which due deliveries are received |
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Browser origins allowed to call the API |
 
 ### 3. Apply database migrations
@@ -315,6 +354,12 @@ Then open **http://127.0.0.1:8000/docs** and try `POST /purchase-orders/auto-sug
 
 A React + Vite web app in `frontend/`. It talks to the API above.
 
+| Page | What it does |
+| --- | --- |
+| **Dashboard** (`/`) | The 18 daily Key Items with stock, reorder level, pack size and status |
+| **Restock Orders** (`/orders`) | Generate a smart restock draft, edit packs per line, submit it; see upcoming deliveries and their automatic delivery date |
+| **Complaints** (`/complaints`) | File a complaint against a received delivery (in packs or units), approve or reject pending complaints |
+
 **Requirements:** Node.js 20.19+ or 22.12+ (required by Vite).
 
 ```bash
@@ -345,12 +390,13 @@ the origins in `CORS_ORIGINS`.
 pytest
 ```
 
-There are **83 tests**, each running against a fresh in-memory database. They include:
+There are **100 tests**, each running against a fresh in-memory database. They include:
 
 - restock maths, pack rounding and floating-point edge cases
 - delivery-day cut-offs on the Berlin clock
 - shift duration limits **across both DST changes**, and every kind of overlap (partial, contained, identical, back-to-back, reassignment)
-- atomic, one-time receiving of deliveries, with rollback on failure
+- automated receiving: due today vs. later, catch-up after downtime, idempotency, one failing order not blocking others, the 06:00 job across the DST change
+- complaints: approve/reject apply stock once, validation against the delivered quantity
 - daily vs. weekly audit rules and variance logging
 - migrations: model/migration drift, full downgrade, and the data backfill for existing rows
 - seed script idempotency

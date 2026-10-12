@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database.migrations import upgrade_to_head
-from app.routers import employees, inventory, purchase_orders, shifts
+from app.routers import complaints, employees, inventory, purchase_orders, shifts
+from app.scheduler import catch_up_on_startup, create_scheduler
 
 
 @asynccontextmanager
@@ -13,7 +14,15 @@ async def lifespan(app: FastAPI):
     # Schema is owned by Alembic: bring the database up to the latest migration.
     if settings.migrate_on_startup:
         upgrade_to_head()
+
+    scheduler = None
+    if settings.auto_receive_enabled:
+        catch_up_on_startup()
+        scheduler = create_scheduler()
+        scheduler.start()
     yield
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -29,6 +38,7 @@ app.include_router(employees.router)
 app.include_router(shifts.router)
 app.include_router(inventory.router)
 app.include_router(purchase_orders.router)
+app.include_router(complaints.router)
 
 
 @app.get("/health", tags=["health"])
